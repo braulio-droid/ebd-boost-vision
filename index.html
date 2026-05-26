@@ -1,0 +1,2793 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EBD Boost Vision v3 — Maestro do Vendedor</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+</script>
+<style>
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0b1220; color: #e6edf7; }
+  .glass { background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); }
+  .glass-strong { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); }
+  .grad-blue { background: linear-gradient(135deg,#1d4ed8,#3b82f6); }
+  .grad-emerald { background: linear-gradient(135deg,#047857,#10b981); }
+  .grad-amber { background: linear-gradient(135deg,#b45309,#f59e0b); }
+  .grad-rose { background: linear-gradient(135deg,#9f1239,#f43f5e); }
+  .grad-violet { background: linear-gradient(135deg,#6d28d9,#a78bfa); }
+  .grad-slate { background: linear-gradient(135deg,#1f2937,#475569); }
+  .grad-promo { background: linear-gradient(135deg,#f59e0b,#dc2626); }
+  .badge { display:inline-flex; align-items:center; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+  .tab-active { background: rgba(59,130,246,0.18); border-bottom: 2px solid #60a5fa; color:#fff; }
+  .pill { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight:600; }
+  .pill-em-dia { background:#064e3b; color:#a7f3d0; }
+  .pill-atencao { background:#78350f; color:#fde68a; }
+  .pill-critico { background:#7f1d1d; color:#fecaca; }
+  .pill-sem-hist { background:#1e293b; color:#cbd5e1; }
+  .kpi-num { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  input[type=file]::file-selector-button { background:#1d4ed8; color:#fff; border:0; padding:6px 12px; border-radius:6px; margin-right:8px; cursor:pointer; font-weight:600; font-size:12px; }
+  input[type=file]::file-selector-button:hover { background:#2563eb; }
+  .leaflet-container { background:#0e1626 !important; }
+  .leaflet-control-zoom a { background:#1f2937 !important; color:#e5e7eb !important; border-color:#334155 !important; }
+  .leaflet-control-attribution { background: rgba(15,23,42,0.7) !important; color:#94a3b8 !important; font-size:10px !important; }
+  .leaflet-control-attribution a { color:#60a5fa !important; }
+  .route-pin { background:#3b82f6; color:white; border-radius:50%; width:30px; height:30px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; border:2px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.4); }
+  .route-pin.critico { background:#ef4444; }
+  .route-pin.atencao { background:#f59e0b; }
+  .route-pin.em-dia { background:#10b981; }
+  .route-pin.atendendo {
+    background: #2563eb;
+    width: 38px; height: 38px; font-size: 15px;
+    border: 3px solid #fff;
+    animation: pulseBlue 1.5s infinite;
+  }
+  .route-pin.concluido { background:#475569; opacity: 0.7; }
+  @keyframes pulseBlue {
+    0%   { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6), 0 2px 6px rgba(0,0,0,0.4); transform: scale(1); }
+    70%  { box-shadow: 0 0 0 14px rgba(37, 99, 235, 0); transform: scale(1.08); }
+    100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); transform: scale(1); }
+  }
+  .pulse-dot {
+    width:10px; height:10px; border-radius:50%; background:#22c55e; display:inline-block;
+    animation: pulseDot 1.2s infinite;
+  }
+  @keyframes pulseDot {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); transform:scale(1); }
+    50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); transform:scale(1.1); }
+  }
+  .checkin-btn { padding: 6px 12px; border-radius: 8px; font-weight: 700; font-size: 12px; text-align:center; transition: all 0.15s; }
+  .progress-bar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #10b981, #22d3ee); transition: width 0.3s; }
+  .client-card { cursor:pointer; transition: all 0.15s; }
+  .client-card:hover { background: rgba(59,130,246,0.10); }
+  .client-card.selected { background: rgba(59,130,246,0.25); border-left: 3px solid #60a5fa; }
+  .checkbox { width:18px; height:18px; border-radius:4px; border:2px solid #475569; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; }
+  .checkbox.checked { background:#10b981; border-color:#10b981; }
+  .product-img { background:#1e293b; width:60px; height:60px; border-radius:8px; object-fit:contain; flex-shrink:0; }
+  .product-img-lg { background:#1e293b; width:120px; height:120px; border-radius:12px; object-fit:contain; }
+  .info-card { padding:14px; border-radius:12px; }
+  .big-btn { padding: 10px 16px; border-radius: 10px; font-weight: 600; font-size: 14px; display:inline-flex; align-items:center; gap:8px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo, useEffect, useRef, useCallback } = React;
+
+/* ============================================================
+   UTILITÁRIOS
+   ============================================================ */
+const normCNPJ = (s) => (s ? String(s).replace(/\D/g, "") : "");
+const normCPF  = (s) => (s ? String(s).replace(/\D/g, "") : "");
+const parseNum = (s) => {
+  if (s === null || s === undefined || s === "") return 0;
+  const n = parseFloat(String(s).replace(",", "."));
+  return isNaN(n) ? 0 : n;
+};
+const parseDateBR = (s) => {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) return new Date(+m[3], +m[2]-1, +m[1]);
+  const m2 = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3]);
+  return null;
+};
+const fmtDate = (d) => d ? d.toLocaleDateString("pt-BR") : "—";
+const fmtMoney = (n) => "R$ " + (n||0).toLocaleString("pt-BR",{minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtInt = (n) => (n||0).toLocaleString("pt-BR");
+const daysBetween = (a, b) => (!a || !b) ? null : Math.round((b - a) / 86400000);
+const STATUS_LABEL = { EM_DIA:"Em dia", ATENCAO:"Atenção", CRITICO:"Crítico 90+", SEM_HIST:"Sem histórico" };
+
+/* ============================================================
+   VISITAS — persistência por vendedor + dia
+   estrutura: { sellerCode: { 'YYYY-MM-DD': { cnpj: { status, checkIn, checkOut, obs } } } }
+   status: 'pendente' (default) | 'em_visita' | 'concluido'
+   ============================================================ */
+const VISITAS_KEY = "ebd_visitas_v3";
+const loadVisitasAll = () => { try { return JSON.parse(localStorage.getItem(VISITAS_KEY)||"{}"); } catch { return {}; } };
+const saveVisitasAll = (v) => { try { localStorage.setItem(VISITAS_KEY, JSON.stringify(v)); } catch {} };
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+const fmtHora = (ts) => ts ? new Date(ts).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) : "—";
+const fmtDuracao = (ms) => {
+  if (!ms || ms<0) return "—";
+  const min = Math.round(ms/60000);
+  if (min<60) return `${min} min`;
+  const h = Math.floor(min/60), m = min%60;
+  return `${h}h${m>0?` ${m}min`:""}`;
+};
+
+/* URL helpers — abrem Maps com trânsito ao vivo */
+function mapsDestinationUrl(coordsOrAddress) {
+  if (typeof coordsOrAddress === "string") {
+    return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${encodeURIComponent(coordsOrAddress)}&dir_action=navigate`;
+  }
+  const { lat, lon } = coordsOrAddress;
+  return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${lat},${lon}&dir_action=navigate`;
+}
+function mapsRotaCompletaUrl(pontos) {
+  if (!pontos || pontos.length<2) return null;
+  const o = `${pontos[0].lat},${pontos[0].lon}`;
+  const d = `${pontos[pontos.length-1].lat},${pontos[pontos.length-1].lon}`;
+  const w = pontos.slice(1,-1).map(c=>`${c.lat},${c.lon}`).join("|");
+  return `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${o}&destination=${d}${w?`&waypoints=${encodeURIComponent(w)}`:""}`;
+}
+
+/* ============================================================
+   GEOCODING (Nominatim) + cache localStorage
+   ============================================================ */
+const GEO_KEY = "ebd_geo_v3";
+const loadGeo = () => { try { return JSON.parse(localStorage.getItem(GEO_KEY)||"{}"); } catch { return {}; } };
+const saveGeo = (c) => { try { localStorage.setItem(GEO_KEY, JSON.stringify(c)); } catch {} };
+const buildAddressQuery = (cli) => [cli.address, cli.neighborhood, cli.city, cli.state, cli.cep, "Brasil"].filter(Boolean).join(", ");
+// Múltiplas variações de endereço para aumentar taxa de match no Nominatim
+const buildAddressVariations = (cli) => {
+  const v = [];
+  const full = [cli.address, cli.neighborhood, cli.city, cli.state, cli.cep, "Brasil"].filter(Boolean).join(", ");
+  if (full) v.push(full);
+  const semCep = [cli.address, cli.neighborhood, cli.city, cli.state, "Brasil"].filter(Boolean).join(", ");
+  if (semCep && semCep !== full) v.push(semCep);
+  // Endereço sem número (remove dígitos do final) — útil quando o número é inválido
+  if (cli.address) {
+    const semNum = cli.address.replace(/\s+\d+\s*$/, "").trim();
+    if (semNum && semNum !== cli.address) {
+      const q = [semNum, cli.neighborhood, cli.city, cli.state, "Brasil"].filter(Boolean).join(", ");
+      if (q && !v.includes(q)) v.push(q);
+    }
+  }
+  // Só bairro + cidade + estado
+  const soBairro = [cli.neighborhood, cli.city, cli.state, "Brasil"].filter(Boolean).join(", ");
+  if (soBairro && !v.includes(soBairro)) v.push(soBairro);
+  // CEP isolado + cidade
+  if (cli.cep) {
+    const cepLimpo = String(cli.cep).replace(/\D/g, "");
+    if (cepLimpo.length >= 5) {
+      const q = [cepLimpo.replace(/(\d{5})(\d{3})/,'$1-$2'), cli.city, cli.state, "Brasil"].filter(Boolean).join(", ");
+      if (!v.includes(q)) v.push(q);
+    }
+  }
+  return v;
+};
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+async function nominatimSearch(q) {
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(q)}`,
+      { headers: { "Accept-Language": "pt-BR" } });
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (!d || !d.length) return null;
+    return { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon), source: "nominatim" };
+  } catch (e) { return null; }
+}
+// Fallback ViaCEP → coordenadas via Nominatim
+async function geocodeByCep(cep, city, state) {
+  const cepLimpo = String(cep||"").replace(/\D/g, "");
+  if (cepLimpo.length !== 8) return null;
+  try {
+    const r = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (d?.erro || !d?.logradouro) return null;
+    const q = [d.logradouro, d.bairro, d.localidade||city, d.uf||state, "Brasil"].filter(Boolean).join(", ");
+    await sleep(1100);
+    const r2 = await nominatimSearch(q);
+    return r2 ? { ...r2, source: "viacep+nominatim" } : null;
+  } catch (e) { return null; }
+}
+
+async function geocodeOne(cli, primaryKey) {
+  const variations = buildAddressVariations(cli);
+  for (const q of variations) {
+    const r = await nominatimSearch(q);
+    if (r) return r;
+    await sleep(1100);
+  }
+  // Última tentativa: ViaCEP
+  if (cli.cep) {
+    const r = await geocodeByCep(cli.cep, cli.city, cli.state);
+    if (r) return r;
+  }
+  return null;
+}
+
+// recebe lista de clientes (não strings)
+async function geocodeBatch(clientes, onProgress) {
+  const cache = loadGeo();
+  const out = {};
+  let done = 0;
+  const total = clientes.length;
+  const failed = [];
+  for (const cli of clientes) {
+    const key = buildAddressQuery(cli);
+    if (!key) { done++; onProgress?.(done, total, failed); continue; }
+    if (cache[key]?.lat) { out[key] = cache[key]; done++; onProgress?.(done, total, failed); continue; }
+    try {
+      const r = await geocodeOne(cli, key);
+      if (r?.lat) { cache[key] = r; out[key] = r; }
+      else { failed.push(cli); }
+    } catch (e) { console.warn("Geocode falhou para", cli.name, e); failed.push(cli); }
+    done++;
+    onProgress?.(done, total, failed);
+  }
+  saveGeo(cache);
+  return { out, failed };
+}
+
+/* ============================================================
+   OSRM ROUTING + NEAREST NEIGHBOR
+   ============================================================ */
+async function osrmRoute(coords) {
+  if (!coords || coords.length < 2) return null;
+  const path = coords.map(c => `${c.lon},${c.lat}`).join(";");
+  const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${path}?overview=full&geometries=geojson&annotations=duration,distance`);
+  if (!r.ok) return null;
+  const d = await r.json();
+  if (!d?.routes?.length) return null;
+  const route = d.routes[0];
+  return {
+    geometry: route.geometry,
+    distance_m: route.distance, duration_s: route.duration,
+    legs: route.legs.map(l => ({ distance_m: l.distance, duration_s: l.duration })),
+  };
+}
+const haversineKm = (a, b) => {
+  const R = 6371, toRad = x => x*Math.PI/180;
+  const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+  const h = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+};
+function nearestNeighborOrder(points, startIdx=0) {
+  if (!points || !points.length) return [];
+  const used = new Set([startIdx]);
+  const order = [startIdx];
+  while (order.length < points.length) {
+    const last = points[order[order.length-1]];
+    let best = -1, bestD = Infinity;
+    for (let i=0; i<points.length; i++) {
+      if (used.has(i)) continue;
+      const d = haversineKm(last, points[i]);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best<0) break;
+    order.push(best); used.add(best);
+  }
+  return order;
+}
+
+/* ============================================================
+   PDF parsing — extrai texto + tenta extrair imagens por página
+   ============================================================ */
+async function pdfExtractTextAndImages(file, onProgress) {
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  const pages = [];
+  const MAX_PAGES = 80;          // limite de segurança
+  const MAX_RENDER_PAGES = 30;   // só renderiza canvas das primeiras 30 para evitar memória
+  const total = Math.min(pdf.numPages, MAX_PAGES);
+  for (let i=1; i<=total; i++) {
+    try {
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      const text = tc.items.map(it => it.str).join(" ");
+      let dataUrl = null;
+      if (i <= MAX_RENDER_PAGES) {
+        try {
+          const viewport = page.getViewport({ scale: 0.8 });
+          const canvas = document.createElement("canvas");
+          canvas.width = viewport.width; canvas.height = viewport.height;
+          const ctx = canvas.getContext("2d");
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          dataUrl = canvas.toDataURL("image/jpeg", 0.55);
+        } catch (e) { /* render falhou — segue sem imagem */ }
+      }
+      pages.push({ page: i, text, dataUrl });
+      onProgress?.(i, total);
+    } catch (e) {
+      pages.push({ page: i, text: "", dataUrl: null, error: String(e?.message||e) });
+    }
+  }
+  const full = pages.map(p => p.text).join("\n");
+  return { pages, full, numPages: pdf.numPages, processed: pages.length };
+}
+
+/* ============================================================
+   IMAGENS DE PRODUTO via OpenFoodFacts (CORS aberto, gratuito)
+   Cache em localStorage. Não inventa imagem — só retorna se a API tiver.
+   ============================================================ */
+const IMG_KEY = "ebd_imgs_v3";
+const loadImgs = () => { try { return JSON.parse(localStorage.getItem(IMG_KEY)||"{}"); } catch { return {}; } };
+const saveImgs = (c) => { try { localStorage.setItem(IMG_KEY, JSON.stringify(c)); } catch {} };
+async function fetchProductImageByEAN(ean) {
+  const cache = loadImgs();
+  if (ean in cache) return cache[ean];
+  try {
+    const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(ean)}.json`);
+    if (!r.ok) { cache[ean] = null; saveImgs(cache); return null; }
+    const d = await r.json();
+    if (d?.status === 1 && d?.product) {
+      const img = d.product.image_front_url || d.product.image_url || d.product.image_thumb_url || null;
+      const result = img ? { url: img, name: d.product.product_name || d.product.generic_name || null, brand: d.product.brands || null } : null;
+      cache[ean] = result; saveImgs(cache); return result;
+    }
+    cache[ean] = null; saveImgs(cache); return null;
+  } catch (e) { return null; }
+}
+
+/* ============================================================
+   DETECÇÃO DE PROMOS DO JORNALZINHO
+   - matchea EAN/SKU em texto extraído do PDF
+   - puxa contexto e preço (R$) próximo
+   - desconto vindo do PDF, preço de lista vindo da planilha de Estoque
+   ============================================================ */
+function detectarPromos(pdfText, engine) {
+  if (!pdfText) return [];
+  const promos = [];
+  const eansEst = new Set(engine.estByEan.keys());
+  const eansVend = new Set();
+  engine.vendasByCnpjEan.forEach(v => eansVend.add(v.ean));
+  const skuToEan = new Map();
+  engine.vendasByCnpjEan.forEach(v => v.sku && !skuToEan.has(String(v.sku)) && skuToEan.set(String(v.sku), v.ean));
+
+  // 1) EAN (12-14 dígitos)
+  const seen = new Set();
+  const reEAN = /\b\d{12,14}\b/g; let m;
+  while ((m = reEAN.exec(pdfText)) !== null) {
+    const ean = m[0];
+    if (seen.has(ean)) continue;
+    if (!eansEst.has(ean) && !eansVend.has(ean)) continue;
+    seen.add(ean);
+    const idx = m.index;
+    const ctx = pdfText.substring(Math.max(0, idx-100), Math.min(pdfText.length, idx+150)).replace(/\s+/g," ").trim();
+    const precoM = ctx.match(/R\$\s*([\d.,]+)/);
+    const descM = ctx.match(/(-?\d{1,2})\s*%/);
+    promos.push({
+      ean, sku: null, matchedBy: "EAN", contexto: ctx,
+      precoTextoPromo: precoM ? precoM[1] : null,
+      precoPromoNum: precoM ? parseNum(precoM[1]) : null,
+      descontoPct: descM ? parseInt(descM[1]) : null,
+      est: engine.estByEan.get(ean), prod: engine.prodByEan.get(ean),
+    });
+  }
+  // 2) SKU (3-6 dígitos) — só se cair em Vendas (evita ruído)
+  const reSKU = /\b\d{3,6}\b/g;
+  while ((m = reSKU.exec(pdfText)) !== null) {
+    const s = m[0];
+    const ean = skuToEan.get(s);
+    if (!ean || seen.has(ean)) continue;
+    seen.add(ean);
+    const idx = m.index;
+    const ctx = pdfText.substring(Math.max(0, idx-100), Math.min(pdfText.length, idx+150)).replace(/\s+/g," ").trim();
+    const precoM = ctx.match(/R\$\s*([\d.,]+)/);
+    const descM = ctx.match(/(-?\d{1,2})\s*%/);
+    promos.push({
+      ean, sku: s, matchedBy: "SKU", contexto: ctx,
+      precoTextoPromo: precoM ? precoM[1] : null,
+      precoPromoNum: precoM ? parseNum(precoM[1]) : null,
+      descontoPct: descM ? parseInt(descM[1]) : null,
+      est: engine.estByEan.get(ean), prod: engine.prodByEan.get(ean),
+    });
+  }
+  return promos;
+}
+
+/* ============================================================
+   DETECÇÃO DE CAMPANHAS — últimos slides do PDF
+   Heurística: blocos com palavras "campanha", "ganhe R$", "positiv", "meta"
+   ============================================================ */
+function detectarCampanhas(pdfPages) {
+  if (!pdfPages || !pdfPages.length) return [];
+  const ultimas = pdfPages.slice(-Math.min(12, pdfPages.length));
+  const camps = [];
+  ultimas.forEach(p => {
+    const t = p.text;
+    if (!t) return;
+    const tLow = t.toLowerCase();
+    const hasKey = ["campanha", "ganhe", "positivação", "positiva", "meta", "bônus", "bonus", "incentivo", "prêmio", "premio"].some(k => tLow.includes(k));
+    if (!hasKey) return;
+    const valM = t.match(/R\$\s*([\d.,]+)/g);
+    const pctM = t.match(/(\d{1,3})\s*%/g);
+    camps.push({
+      page: p.page,
+      pageImage: p.dataUrl,
+      texto: t.substring(0, 600),
+      valoresMencionados: valM ? valM.slice(0,5) : [],
+      percentuaisMencionados: pctM ? pctM.slice(0,5) : [],
+    });
+  });
+  return camps;
+}
+
+/* ============================================================
+   DAYS ON HAND (DOH)
+   DOH = estoque_qtd ÷ media_diaria_vendas
+   Saudável: ~30 dias. Alto: >60 dias. Crítico baixo: <7 dias.
+   Mais robusto: estoque_valorizado ÷ (media_vendas_diaria * preco) × 30
+   Como temos só volume/qtd, fazemos por unidades:
+   ============================================================ */
+function calcDOH(ean, est, vendasByCnpjEan, refDate, periodoVendas) {
+  if (!est || est.qtd <= 0) return { doh: 0, classificacao: "sem_estoque", vendaMediaDia: 0 };
+  // Soma volume vendido desse EAN
+  let totalQtd = 0;
+  vendasByCnpjEan.forEach(v => { if (v.ean === ean) totalQtd += v.qtd; });
+  if (totalQtd <= 0) return { doh: Infinity, classificacao: "sem_giro", vendaMediaDia: 0 };
+  const diasPeriodo = Math.max(1, periodoVendas);
+  const vendaMediaDia = totalQtd / diasPeriodo;
+  const doh = est.qtd / vendaMediaDia;
+  let classificacao;
+  if (doh < 7) classificacao = "baixo";          // pode faltar
+  else if (doh <= 45) classificacao = "saudavel";
+  else if (doh <= 90) classificacao = "alto";    // começar a dar saída
+  else classificacao = "critico_alto";           // urgência de venda
+  return { doh: Math.round(doh), classificacao, vendaMediaDia: Number(vendaMediaDia.toFixed(2)) };
+}
+
+/* ============================================================
+   PARSER CSV
+   ============================================================ */
+const parseCSV = (file) => new Promise((resolve, reject) => {
+  Papa.parse(file, {
+    header: true, skipEmptyLines: true, delimiter: ";",
+    transformHeader: h => h.trim(),
+    complete: (r) => resolve(r.data), error: reject,
+  });
+});
+
+/* ============================================================
+   ENGINE
+   ============================================================ */
+function buildEngine(data) {
+  const { vendedores=[], carteira=[], clientes=[], roteiros=[], vendas=[], estoque=[], produtos=[] } = data;
+
+  // VENDEDORES
+  const vendByCode = new Map(), vendByCpf = new Map();
+  vendedores.forEach(v => {
+    const code = String(v.internal_code||"").trim();
+    const cpf  = normCPF(v.cpf);
+    const obj = { ...v, internal_code: code, cpf, ativo: (v.delete||"").trim().toUpperCase() !== "S" };
+    if (code) vendByCode.set(code, obj);
+    if (cpf)  vendByCpf.set(cpf, obj);
+  });
+
+  // CARTEIRA
+  const carteiraByCpf = new Map();
+  carteira.forEach(c => {
+    const cpf = normCPF(c.sellers_identify);
+    const pdv = normCNPJ(c.point_of_sale_identify);
+    if (!cpf || !pdv) return;
+    if (!carteiraByCpf.has(cpf)) carteiraByCpf.set(cpf, new Set());
+    carteiraByCpf.get(cpf).add(pdv);
+  });
+
+  // CLIENTES — agora exibimos código externo prominentemente
+  const cliByCnpj = new Map();
+  const cliByExtCode = new Map();
+  clientes.forEach(c => {
+    const id = normCNPJ(c.identify);
+    if (!id) return;
+    const obj = {
+      cnpj: id, cnpj_fmt: c.identify, external_code: c.external_code,
+      name: c.name || c.nickname || "(sem nome)", nickname: c.nickname,
+      tag: c.tag, ramo: c.tag,  // alias: tag = ramo
+      address: c.address, neighborhood: c.neighborhood, cep: c.cep,
+      city: c.city, state: c.state, phone: c.phone,
+      channel: c.channel, segment: c.segment,
+      route_code: c.code_route, route_desc: c.desc_route,
+      square_code: c.code_square, square_desc: c.desc_square,
+      seller: c.seller, supervisor: c.supervisor, manager: c.manager,
+      economic_group: c.economic_group,
+    };
+    cliByCnpj.set(id, obj);
+    if (c.external_code) cliByExtCode.set(String(c.external_code).trim(), obj);
+  });
+
+  // PRODUTOS (planilha opcional — quando vier)
+  const prodByEan = new Map();
+  const prodBySku = new Map();
+  produtos.forEach(p => {
+    const ean = String(p.ean||"").trim();
+    const sku = String(p.sku||p.internal_code||"").trim();
+    const obj = {
+      ean, sku, internal_code: p.internal_code,
+      name: p.name, manufacturer: p.manufacturer, brand: p.brand,
+      category: p.category, subcategory: p.subcategory,
+      department: p.department, section: p.section,
+      cnpj_manufacturer: p.cnpj_manufacturer,
+      tags: p.tags, status: p.status,
+      weight: parseNum(p.weight), weight_unity: p.weight_unity,
+    };
+    if (ean) prodByEan.set(ean, obj);
+    if (sku) prodBySku.set(sku, obj);
+  });
+
+  // ROTEIROS
+  const rotByCode = new Map();
+  roteiros.forEach(r => {
+    const code = String(r.user_internal_code||"").trim();
+    const cnpj = normCNPJ(r.customer_identify);
+    if (!code) return;
+    const d = parseDateBR(r.date);
+    if (!rotByCode.has(code)) rotByCode.set(code, []);
+    rotByCode.get(code).push({ cnpj, customer_code: r.customer_code, date: d, dateStr: r.date, order: parseInt(r.order)||0, name: r.name });
+  });
+  rotByCode.forEach(list => list.sort((a,b) => (a.date?.getTime()||0)-(b.date?.getTime()||0) || a.order-b.order));
+
+  // VENDAS
+  let maxDateVendas = null, minDateVendas = null;
+  const vendasByCnpj = new Map();
+  const vendasByVendedorCode = new Map();
+  const vendasByCnpjEan = new Map();
+  vendas.forEach(v => {
+    const cnpj = normCNPJ(v.point_of_sale_cnpj);
+    const code = String(v.seller_internal_code||"").trim();
+    const d    = parseDateBR(v.sale_date);
+    const ean  = String(v.sale_ean||"").trim();
+    const sku  = String(v.sale_sku||"").trim();
+    const valor = parseNum(v.sale_sellout_money);
+    const volume = parseNum(v.sale_sellout_volume);
+    const obj = { cnpj, code, date: d, dateStr: v.sale_date, ean, sku, dun: v.sale_dun, valor, volume, sale_channel: v.sale_channel, pdv_name: v.point_of_sale_name };
+    if (cnpj) (vendasByCnpj.get(cnpj) || vendasByCnpj.set(cnpj, []).get(cnpj)).push(obj);
+    if (code) (vendasByVendedorCode.get(code) || vendasByVendedorCode.set(code, []).get(code)).push(obj);
+    if (cnpj && ean) {
+      const k = `${cnpj}|${ean}`;
+      if (!vendasByCnpjEan.has(k)) vendasByCnpjEan.set(k, { cnpj, ean, sku, qtd:0, valor:0, n:0, lastDate:null });
+      const a = vendasByCnpjEan.get(k);
+      a.qtd += volume; a.valor += valor; a.n += 1;
+      if (d && (!a.lastDate || d > a.lastDate)) a.lastDate = d;
+    }
+    if (d) {
+      if (!maxDateVendas || d > maxDateVendas) maxDateVendas = d;
+      if (!minDateVendas || d < minDateVendas) minDateVendas = d;
+    }
+  });
+
+  // ESTOQUE — pega melhor (mais recente, maior qtd) por EAN
+  const estByEan = new Map();
+  estoque.forEach(e => {
+    const ean = String(e.ean_sku||"").trim();
+    if (!ean) return;
+    const qtd = parseNum(e.unit_quantity);
+    const obj = {
+      ean, qtd, unit: e.unit_abbrev,
+      list_price: parseNum(e.list_price), cost: parseNum(e.cost_price),
+      margin: parseNum(e.margin), validity: e.product_validity,
+      turnover: parseNum(e.turnover_days), lead_time: parseNum(e.lead_time),
+      availability: e.availability_status, weight: parseNum(e.weight),
+    };
+    if (!estByEan.has(ean) || estByEan.get(ean).qtd < qtd) estByEan.set(ean, obj);
+  });
+
+  // refDate
+  const refDate = maxDateVendas || new Date();
+  const periodoVendasDias = (minDateVendas && maxDateVendas) ? Math.max(1, daysBetween(minDateVendas, maxDateVendas) + 1) : 1;
+
+  // SELLERS consolidados
+  const sellerSet = new Map();
+  vendedores.forEach(v => sellerSet.set(v.internal_code, {
+    internal_code: v.internal_code, cpf: v.cpf, name: v.name, email: v.email,
+    ativo: (v.delete||"").trim().toUpperCase()!=="S", origem: ['Vendedores']
+  }));
+  carteiraByCpf.forEach((_, cpf) => {
+    const v = vendByCpf.get(cpf);
+    if (!v) sellerSet.set(`cpf:${cpf}`, { internal_code: null, cpf, name: `(sem cadastro — CPF ${cpf.slice(0,4)}…)`, ativo: true, origem: ['Carteira sem cadastro'] });
+  });
+  const sellers = Array.from(sellerSet.values());
+
+  function clientesDoVendedor(seller) {
+    if (!seller) return [];
+    const cnpjsCart = seller.cpf ? (carteiraByCpf.get(seller.cpf) || new Set()) : new Set();
+    const cnpjsRot = new Set((seller.internal_code && rotByCode.get(seller.internal_code) || []).map(r => r.cnpj));
+    const all = new Set([...cnpjsCart, ...cnpjsRot]);
+    if (seller.internal_code && vendasByVendedorCode.has(seller.internal_code)) {
+      vendasByVendedorCode.get(seller.internal_code).forEach(v => v.cnpj && all.add(v.cnpj));
+    }
+    const out = [];
+    all.forEach(cnpj => {
+      const cli = cliByCnpj.get(cnpj);
+      const vendasCli = vendasByCnpj.get(cnpj) || [];
+      const ultVenda = vendasCli.reduce((acc, v) => (v.date && (!acc || v.date>acc)) ? v.date : acc, null);
+      const totVenda = vendasCli.reduce((a,v)=>a+v.valor, 0);
+      const numVenda = vendasCli.length;
+      const diasSemVenda = ultVenda ? daysBetween(ultVenda, refDate) : null;
+      // 90 dias para crítico (decisão Thomaz)
+      let status = "SEM_HIST";
+      if (ultVenda) {
+        if (diasSemVenda <= 30) status = "EM_DIA";
+        else if (diasSemVenda <= 90) status = "ATENCAO";
+        else status = "CRITICO";
+      }
+      const noRoteiro = cnpjsRot.has(cnpj);
+      const naCarteira = cnpjsCart.has(cnpj);
+      const rotEntry = seller.internal_code && rotByCode.get(seller.internal_code) ? rotByCode.get(seller.internal_code).find(r => r.cnpj === cnpj) : null;
+      out.push({ cnpj, cli: cli || { cnpj, cnpj_fmt: cnpj, name: "(não cadastrado)", external_code: "—" },
+        ultVenda, totVenda, numVenda, diasSemVenda, status, noRoteiro, naCarteira, rotEntry, vendasCli });
+    });
+    return out;
+  }
+
+  function scoreCliente(c) {
+    let sRec = 0;
+    if (c.diasSemVenda === null) sRec = 70;
+    else if (c.diasSemVenda > 90) sRec = 100;
+    else if (c.diasSemVenda > 30) sRec = 65;
+    else sRec = 25;
+    const sHist = Math.min(100, c.totVenda / 500);
+    const sOp = (c.vendasCli?.length||0) > 3 ? 70 : ((c.vendasCli?.length||0) > 0 ? 50 : 25);
+    const sCob = (c.naCarteira && !c.noRoteiro) ? 100 : (c.naCarteira && c.noRoteiro ? 60 : 80);
+    const sQual = c.cli?.cep ? 100 : 50;
+    const total = sRec*0.4 + sHist*0.25 + sOp*0.2 + sCob*0.1 + sQual*0.05;
+    const motivos = [];
+    if (c.diasSemVenda === null) motivos.push("Sem histórico confiável de visita/venda.");
+    else if (c.diasSemVenda > 90) motivos.push(`${c.diasSemVenda} dias sem comprar (proxy via última venda). Crítico de recuperação.`);
+    else if (c.diasSemVenda > 30) motivos.push(`${c.diasSemVenda} dias desde a última compra — atenção.`);
+    if (c.naCarteira && !c.noRoteiro) motivos.push("Está na carteira mas fora do roteiro do período.");
+    if (c.totVenda > 0) motivos.push(`Histórico de ${fmtMoney(c.totVenda)} em vendas.`);
+    if (c.cli && !c.cli.cep) motivos.push("Endereço incompleto — confirmar antes de visitar.");
+    if (!motivos.length) motivos.push("Manter cobertura padrão.");
+    return { total: Math.round(total), motivos };
+  }
+
+  function recomendaProdutos(c, limit=5) {
+    const eansComprados = new Map();
+    (c.vendasCli||[]).forEach(v => {
+      if (!v.ean) return;
+      if (!eansComprados.has(v.ean)) eansComprados.set(v.ean, { ean:v.ean, sku:v.sku, qtd:0, valor:0, n:0, lastDate:null });
+      const a = eansComprados.get(v.ean);
+      a.qtd += v.volume; a.valor += v.valor; a.n += 1;
+      if (v.date && (!a.lastDate || v.date>a.lastDate)) a.lastDate = v.date;
+    });
+    const ultDate = c.ultVenda;
+    const eansUltima = new Set((c.vendasCli||[]).filter(v => v.date && ultDate && v.date.getTime()===ultDate.getTime()).map(v => v.ean));
+    const cands = [];
+    eansComprados.forEach(p => {
+      const est = estByEan.get(p.ean);
+      const prod = prodByEan.get(p.ean);
+      const naUlt = eansUltima.has(p.ean);
+      const diasUlt = p.lastDate ? daysBetween(p.lastDate, refDate) : null;
+      let conf = "BAIXA"; const ms = [];
+      if (p.n >= 2) { conf = "MÉDIA"; ms.push(`Recorrente (${p.n}× compras).`); }
+      if (p.n >= 1 && !naUlt && diasUlt > 10) { conf = "ALTA"; ms.push(`Comprava e não comprou na última venda (${diasUlt}d).`); }
+      if (naUlt) ms.push("Está na última venda — reposição.");
+      if (est?.qtd > 0) ms.push(`Estoque ${fmtInt(est.qtd)} ${est.unit||"un"}.`);
+      else { ms.push("Sem estoque cadastrado — alerta."); conf = "BAIXA"; }
+      let score = p.n*10 + Math.min(50, p.valor/100);
+      if (est?.qtd > 0) score += 20;
+      if (!naUlt && p.n>=2) score += 25;
+      cands.push({ ...p, est, prod, conf, motivos: ms, score, naUltVenda: naUlt, diasUltCompra: diasUlt });
+    });
+    return cands.sort((a,b)=>b.score-a.score).slice(0, limit);
+  }
+
+  /* ========================================================
+     RECOMENDAÇÃO INTELIGENTE — cruza histórico × informativo × ramo
+     Tipos:
+     1) reposicao        — cliente JÁ compra + está no informativo
+     2) novoInformativo  — cliente NUNCA comprou, mas clientes do mesmo ramo compram
+     3) recompra         — cliente comprava e não comprou na última venda (sem promo)
+     4) campanha         — produto vinculado a campanha vigente (texto)
+     ======================================================== */
+  function recomendaInteligente(c, promos = [], campanhas = []) {
+    const cesta = new Set((c.vendasCli||[]).map(v => v.ean).filter(Boolean));
+    const promosByEan = new Map(promos.map(p => [p.ean, p]));
+    const ramo = c.cli?.ramo || c.cli?.tag || null;
+    const ultDate = c.ultVenda;
+    const eansUltima = new Set((c.vendasCli||[])
+      .filter(v => v.date && ultDate && v.date.getTime() === ultDate.getTime())
+      .map(v => v.ean));
+    const eansFreq = new Map();
+    (c.vendasCli||[]).forEach(v => {
+      if (!v.ean) return;
+      eansFreq.set(v.ean, (eansFreq.get(v.ean)||0) + 1);
+    });
+
+    // 1) Reposição — já compra E está no informativo
+    const reposicao = [];
+    cesta.forEach(ean => {
+      const promo = promosByEan.get(ean);
+      if (!promo) return;
+      const est = estByEan.get(ean);
+      const prod = prodByEan.get(ean);
+      const freq = eansFreq.get(ean) || 1;
+      const lastDate = (c.vendasCli||[]).filter(v=>v.ean===ean).reduce((a,v)=>(v.date&&(!a||v.date>a))?v.date:a, null);
+      const dias = lastDate ? daysBetween(lastDate, refDate) : null;
+      reposicao.push({
+        ean, sku: prod?.sku || promo.sku, prod, est, promo,
+        tipo: "reposicao", freq, ultCompraEan: lastDate, diasUltCompraEan: dias,
+        motivo: `Cliente já compra (${freq}×) e o item está em destaque no informativo${promo.descontoPct?` (${Math.abs(promo.descontoPct)}% off)`:""}. Reposição garantida.`,
+        score: 100 + freq*5 + (est?.qtd>0?20:-30),
+      });
+    });
+
+    // 2) Novo do informativo — cliente NÃO compra, mas clientes do MESMO ramo compram
+    const novoInformativo = [];
+    if (ramo) {
+      // Pré-compute: para cada EAN, quantos clientes do mesmo ramo compram
+      const ramoEanCount = new Map();
+      cliByCnpj.forEach((cli, cnpj) => {
+        if (cnpj === c.cnpj) return;
+        const r = cli.ramo || cli.tag;
+        if (r !== ramo) return;
+        const vs = vendasByCnpj.get(cnpj) || [];
+        const eansDeste = new Set(vs.map(v => v.ean).filter(Boolean));
+        eansDeste.forEach(e => ramoEanCount.set(e, (ramoEanCount.get(e)||0) + 1));
+      });
+      promos.forEach(promo => {
+        if (cesta.has(promo.ean)) return; // já está em reposição
+        const n = ramoEanCount.get(promo.ean) || 0;
+        if (n < 1) return;
+        const est = estByEan.get(promo.ean);
+        const prod = prodByEan.get(promo.ean);
+        novoInformativo.push({
+          ean: promo.ean, sku: prod?.sku || promo.sku, prod, est, promo,
+          tipo: "novoInformativo", countSimilares: n, ramo,
+          motivo: `${n} cliente${n>1?"s":""} do ramo "${ramo}" já compra${n>1?"m":""}. Está no informativo — oportunidade de introduzir.`,
+          score: 60 + n*8 + (est?.qtd>0?20:-30) + (promo.descontoPct?10:0),
+        });
+      });
+    }
+
+    // 3) Recompra esquecida — recorrente, não comprou na última venda, e NÃO está em reposição (já incluído)
+    const recompra = [];
+    eansFreq.forEach((freq, ean) => {
+      if (freq < 2) return;
+      if (eansUltima.has(ean)) return;
+      if (promosByEan.has(ean)) return; // se está no informativo, já é reposição
+      const est = estByEan.get(ean);
+      const prod = prodByEan.get(ean);
+      const lastDate = (c.vendasCli||[]).filter(v=>v.ean===ean).reduce((a,v)=>(v.date&&(!a||v.date>a))?v.date:a, null);
+      const dias = lastDate ? daysBetween(lastDate, refDate) : null;
+      recompra.push({
+        ean, sku: prod?.sku, prod, est, tipo: "recompra", freq, diasUltCompraEan: dias,
+        motivo: `Comprou ${freq}× anteriormente e ficou de fora da última venda (${dias||"?"}d). Reposição esquecida.`,
+        score: 40 + freq*4 + (est?.qtd>0?15:-30),
+      });
+    });
+
+    // 4) Campanha aplicável — heurística: campanha cita texto que aparece no nome do produto comprado
+    const campanha = [];
+    if (campanhas?.length && cesta.size>0) {
+      campanhas.forEach((camp, ci) => {
+        const lower = (camp.texto||"").toLowerCase();
+        cesta.forEach(ean => {
+          const prod = prodByEan.get(ean);
+          const nome = (prod?.name||"").toLowerCase();
+          const marca = (prod?.brand||"").toLowerCase();
+          if (!nome && !marca) return;
+          const matchN = nome && nome.length>3 && lower.includes(nome.substring(0, Math.min(15, nome.length)));
+          const matchM = marca && marca.length>3 && lower.includes(marca);
+          if (matchN || matchM) {
+            const est = estByEan.get(ean);
+            campanha.push({
+              ean, sku: prod?.sku, prod, est, tipo: "campanha", campIdx: ci+1,
+              motivo: `Produto possivelmente aplicável à Campanha ${ci+1} (página ${camp.page} do informativo).`,
+              score: 50 + (est?.qtd>0?15:0),
+            });
+          }
+        });
+      });
+    }
+
+    return {
+      reposicao: reposicao.sort((a,b)=>b.score-a.score).slice(0, 6),
+      novoInformativo: novoInformativo.sort((a,b)=>b.score-a.score).slice(0, 6),
+      recompra: recompra.sort((a,b)=>b.score-a.score).slice(0, 6),
+      campanha: campanha.sort((a,b)=>b.score-a.score).slice(0, 4),
+      totalOportunidades: reposicao.length + novoInformativo.length + recompra.length + campanha.length,
+    };
+  }
+
+  return {
+    refDate, periodoVendasDias,
+    vendedores, sellers,
+    vendByCode, vendByCpf,
+    carteiraByCpf, rotByCode,
+    cliByCnpj, cliByExtCode,
+    vendasByCnpj, vendasByVendedorCode, vendasByCnpjEan,
+    estByEan, prodByEan, prodBySku,
+    clientesDoVendedor, scoreCliente, recomendaProdutos, recomendaInteligente,
+    raw: data,
+  };
+}
+
+/* ============================================================
+   UI HELPERS
+   ============================================================ */
+const KpiCard = ({ label, value, sub, grad="grad-blue", icon }) => (
+  <div className={`rounded-2xl p-4 ${grad} shadow-lg`}>
+    <div className="flex items-start justify-between">
+      <div className="text-xs uppercase tracking-wider text-white/80 font-semibold">{label}</div>
+      {icon && <span className="text-white/70 text-lg">{icon}</span>}
+    </div>
+    <div className="mt-2 text-3xl font-bold kpi-num text-white">{value}</div>
+    {sub && <div className="mt-1 text-xs text-white/70">{sub}</div>}
+  </div>
+);
+const StatusPill = ({ status }) => {
+  const cls = { EM_DIA:"pill-em-dia", ATENCAO:"pill-atencao", CRITICO:"pill-critico", SEM_HIST:"pill-sem-hist" }[status] || "pill-sem-hist";
+  return <span className={`pill ${cls}`}>{STATUS_LABEL[status]}</span>;
+};
+function ProductImage({ ean, sku, prod, size="sm" }) {
+  const [img, setImg] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!ean) return;
+    fetchProductImageByEAN(ean).then(r => { if (alive) { setImg(r); setLoaded(true); } });
+    return () => { alive = false; };
+  }, [ean]);
+  const cls = size==="lg" ? "product-img-lg" : "product-img";
+  if (!loaded) return <div className={`${cls} flex items-center justify-center text-slate-500 text-[10px]`}>…</div>;
+  if (img?.url) return <img src={img.url} alt={prod?.name||sku||ean} className={cls} loading="lazy" />;
+  // Fallback: link Google Imagens
+  return (
+    <a className={`${cls} flex items-center justify-center text-slate-400 text-[10px] hover:bg-slate-700`}
+      href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent((prod?.name||sku||ean)+" produto")}`}
+      target="_blank" rel="noopener" title="Sem imagem no OpenFoodFacts — abrir busca Google Imagens">
+      🔍 sem foto
+    </a>
+  );
+}
+
+/* ============================================================
+   APP
+   ============================================================ */
+const TABS = [
+  { id:"geral",       label:"Visão Geral",      icon:"📊" },
+  { id:"briefing",    label:"Briefing do Dia",  icon:"🎯" },
+  { id:"recuperacao", label:"Recuperação 90+",  icon:"🚨" },
+  { id:"informativo", label:"Informativo",      icon:"📰" },
+  { id:"campanhas",   label:"Campanhas",        icon:"🏆" },
+  { id:"resumo",      label:"Resumo Vendedor",  icon:"📈" },
+  { id:"supervisor",  label:"Supervisor",       icon:"👁️" },
+  { id:"qualidade",   label:"Qualidade",        icon:"🔍" },
+];
+
+function App() {
+  const [data, setData] = useState(null);
+  const [engine, setEngine] = useState(null);
+  const [tab, setTab] = useState("briefing");
+  const [sellerCode, setSellerCode] = useState("");
+  const [jornal, setJornal] = useState(null);
+  const [promos, setPromos] = useState([]);
+  const [campanhas, setCampanhas] = useState([]);
+
+  useEffect(() => { if (data) setEngine(buildEngine(data)); }, [data]);
+  useEffect(() => {
+    if (!engine || sellerCode) return;
+    const first = engine.sellers.find(s => s.internal_code && engine.rotByCode.has(s.internal_code))
+               || engine.sellers.find(s => s.internal_code);
+    if (first) setSellerCode(first.internal_code);
+  }, [engine]);
+  useEffect(() => {
+    if (engine && jornal?.full) setPromos(detectarPromos(jornal.full, engine));
+    if (jornal?.pages) setCampanhas(detectarCampanhas(jornal.pages));
+  }, [jornal, engine]);
+
+  if (!data) return (<div className="min-h-screen"><Header /><UploadScreen onLoaded={(d,p) => { setData(d); if (p) setJornal(p); }} /></div>);
+  if (!engine) return <div className="p-8 text-center">Construindo engine…</div>;
+
+  const seller = engine.sellers.find(s => s.internal_code === sellerCode);
+
+  return (
+    <div className="min-h-screen pb-20">
+      <Header engine={engine} sellerCode={sellerCode} setSellerCode={setSellerCode}
+        onReset={() => { setData(null); setEngine(null); setJornal(null); setPromos([]); setCampanhas([]); }} />
+      <Nav tab={tab} setTab={setTab} jornalLoaded={!!jornal} promosCount={promos.length} campsCount={campanhas.length} />
+      <main className="max-w-[1600px] mx-auto px-4 pt-5">
+        {tab === "geral"       && <VisaoGeral engine={engine} setTab={setTab} />}
+        {tab === "briefing"    && <Briefing engine={engine} seller={seller} promos={promos} campanhas={campanhas} />}
+        {tab === "recuperacao" && <Recuperacao engine={engine} seller={seller} />}
+        {tab === "informativo" && <Informativo engine={engine} promos={promos} jornal={jornal} setJornal={setJornal} />}
+        {tab === "campanhas"   && <Campanhas campanhas={campanhas} jornal={jornal} />}
+        {tab === "resumo"      && <ResumoVendedor engine={engine} seller={seller} />}
+        {tab === "supervisor"  && <Supervisor engine={engine} setSellerCode={(c)=>{setSellerCode(c); setTab("briefing");}} />}
+        {tab === "qualidade"   && <Qualidade engine={engine} />}
+      </main>
+    </div>
+  );
+}
+
+function Header({ engine, sellerCode, setSellerCode, onReset }) {
+  return (
+    <header className="sticky top-0 z-50 backdrop-blur bg-[#0b1220]/90 border-b border-white/10">
+      <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg grad-blue flex items-center justify-center text-white font-bold">EB</div>
+          <div>
+            <div className="font-bold text-lg leading-none">EBD Boost Vision <span className="text-xs text-blue-300">v3</span></div>
+            <div className="text-[11px] text-slate-400">Maestro do vendedor · Sellers</div>
+          </div>
+        </div>
+        {engine && (
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="glass rounded-lg px-3 py-1.5">
+              <span className="text-[11px] text-slate-400 mr-2">Vendedor</span>
+              <select className="bg-transparent text-sm focus:outline-none" value={sellerCode||""}
+                onChange={(e) => setSellerCode(e.target.value)}>
+                {engine.sellers.filter(s => s.internal_code).sort((a,b)=>(a.name||"").localeCompare(b.name||""))
+                  .map(s => <option key={s.internal_code} value={s.internal_code} className="bg-slate-900">{s.name}{s.ativo ? "" : " (inativo)"}</option>)}
+              </select>
+            </div>
+            <div className="glass rounded-lg px-3 py-1.5 text-xs">
+              <span className="text-slate-400 mr-1">Ref:</span><b>{fmtDate(engine.refDate)}</b>
+              <span className="text-slate-400 ml-2 mr-1">Janela vendas:</span><b>{engine.periodoVendasDias}d</b>
+            </div>
+            <button onClick={onReset} className="text-xs glass-strong px-3 py-1.5 rounded-lg hover:bg-white/10">↺ Recarregar</button>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function Nav({ tab, setTab, jornalLoaded, promosCount, campsCount }) {
+  return (
+    <nav className="bg-[#0e1626] border-b border-white/10">
+      <div className="max-w-[1600px] mx-auto px-2 flex overflow-x-auto scroll-thin">
+        {TABS.map(t => {
+          const badge = (t.id==="informativo" && promosCount>0) ? promosCount
+                      : (t.id==="campanhas" && campsCount>0) ? campsCount
+                      : null;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 border-transparent text-slate-300 hover:text-white flex items-center gap-2 ${tab===t.id ? "tab-active" : ""}`}>
+              <span>{t.icon}</span>{t.label}
+              {badge && <span className="badge bg-blue-700 text-white text-[10px] px-1.5">{badge}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+/* ============================================================
+   UPLOAD
+   ============================================================ */
+function UploadScreen({ onLoaded }) {
+  const [files, setFiles] = useState({});
+  const [pdf, setPdf] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [pdfProgress, setPdfProgress] = useState(null);
+
+  const slots = [
+    { k:"carteira",   label:"1. Carteira do Vendedor", hint:"sellers_identify, point_of_sale_identify" },
+    { k:"vendas",     label:"2. Vendas",               hint:"point_of_sale_cnpj, sale_date, sale_ean, sale_sellout_money, seller_internal_code" },
+    { k:"vendedores", label:"3. Vendedores",           hint:"internal_code, cpf, name, delete" },
+    { k:"clientes",   label:"4. Clientes",             hint:"identify (CNPJ), external_code, name, address, code_route, seller, supervisor" },
+    { k:"estoque",    label:"5. Estoque",              hint:"ean_sku, unit_quantity, list_price, margin, turnover_days" },
+    { k:"roteiros",   label:"6. Roteiros",             hint:"user_internal_code, customer_identify, date, order" },
+    { k:"produtos",   label:"7. Produtos (opcional)",  hint:"ean, sku, name, manufacturer, category, brand — usado para foto + categoria" },
+  ];
+
+  const handlePick = (k, f) => setFiles(prev => ({ ...prev, [k]: f }));
+
+  const handleProcess = async () => {
+    setLoading(true); setError(null);
+    try {
+      const data = {};
+      for (const s of slots) {
+        try { data[s.k] = files[s.k] ? await parseCSV(files[s.k]) : []; }
+        catch (e) { console.error("Erro CSV", s.k, e); data[s.k] = []; }
+      }
+      let pdfData = null;
+      if (pdf) {
+        try {
+          setPdfProgress("Extraindo texto do PDF…");
+          pdfData = await pdfExtractTextAndImages(pdf, (i, total) => setPdfProgress(`Lendo PDF: página ${i}/${total}…`));
+          pdfData.fileName = pdf.name;
+        } catch (e) {
+          console.error("Erro PDF — seguindo sem ele", e);
+          setError("PDF falhou ao processar — abrindo sem ele. " + (e?.message || ""));
+        }
+      }
+      onLoaded(data, pdfData);
+    } catch (e) {
+      console.error("Erro fatal upload:", e);
+      setError(String(e?.message || e));
+    }
+    finally { setLoading(false); setPdfProgress(null); }
+  };
+
+  const ready = ["carteira","vendas","vendedores","clientes","estoque","roteiros"].filter(k => files[k]).length;
+
+  return (
+    <div className="max-w-5xl mx-auto p-6">
+      <div className="glass rounded-2xl p-8">
+        <h2 className="text-2xl font-bold mb-1">Carregue as bases da operação</h2>
+        <p className="text-sm text-slate-300 mb-5">Tudo local no navegador. Os 6 primeiros CSVs são essenciais. <b>Produtos.csv</b> (opcional) melhora a recomendação. <b>Jornalzinho.pdf</b> habilita Informativo e Campanhas.</p>
+        <div className="grid md:grid-cols-2 gap-3">
+          {slots.map(s => (
+            <div key={s.k} className="glass-strong rounded-xl p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold text-sm">{s.label}</span>
+                {files[s.k] && <span className="text-emerald-400 text-xs">✓</span>}
+              </div>
+              <div className="text-[11px] text-slate-400 mb-2">{s.hint}</div>
+              <input type="file" accept=".csv,text/csv" onChange={(e) => handlePick(s.k, e.target.files?.[0])} className="text-xs text-slate-200" />
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 glass-strong rounded-xl p-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="font-semibold text-sm">📰 Jornalzinho EBD (PDF)</span>
+            {pdf && <span className="text-emerald-400 text-xs">✓ {pdf.name}</span>}
+          </div>
+          <div className="text-[11px] text-slate-400 mb-2">PDF com promoções e campanhas. Habilita as abas Informativo e Campanhas. Sistema extrai texto + renderiza imagens das páginas.</div>
+          <input type="file" accept="application/pdf,.pdf" onChange={(e)=>setPdf(e.target.files?.[0])} className="text-xs text-slate-200" />
+        </div>
+        {error && <div className="mt-4 p-3 bg-rose-900/40 text-rose-200 rounded-lg text-sm">{error}</div>}
+        {pdfProgress && <div className="mt-3 text-xs text-amber-300">{pdfProgress}</div>}
+        <div className="mt-5 flex items-center gap-3">
+          <button onClick={handleProcess} disabled={loading || ready===0} className="px-5 py-2.5 rounded-xl grad-blue text-white font-semibold disabled:opacity-40">
+            {loading ? "Processando…" : `Processar ${ready}/6 essenciais${pdf?" + PDF":""}${files.produtos?" + Produtos":""}`}
+          </button>
+          <span className="text-xs text-slate-400">Funciona mesmo sem todas as planilhas.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   VISÃO GERAL
+   ============================================================ */
+function VisaoGeral({ engine, setTab }) {
+  const s = useMemo(() => {
+    const tCli = engine.cliByCnpj.size;
+    const tCart = Array.from(engine.carteiraByCpf.values()).reduce((a,s)=>a+s.size,0);
+    const tRot = Array.from(engine.rotByCode.values()).reduce((a,l)=>a+l.length,0);
+    const tValor = Array.from(engine.vendasByCnpj.values()).flat().reduce((a,v)=>a+v.valor,0);
+    let c={EM_DIA:0,ATENCAO:0,CRITICO:0,SEM_HIST:0};
+    engine.cliByCnpj.forEach((_, cnpj) => {
+      const v = engine.vendasByCnpj.get(cnpj);
+      if (!v) { c.SEM_HIST++; return; }
+      const ult = v.reduce((a,x)=>(x.date&&(!a||x.date>a))?x.date:a, null);
+      if (!ult) { c.SEM_HIST++; return; }
+      const d = daysBetween(ult, engine.refDate);
+      if (d<=30) c.EM_DIA++; else if (d<=90) c.ATENCAO++; else c.CRITICO++;
+    });
+    return { tCli, tCart, tRot, tValor, c };
+  }, [engine]);
+  return (
+    <div>
+      <div className="grid md:grid-cols-4 gap-4 mb-4">
+        <KpiCard label="Clientes na base" value={fmtInt(s.tCli)} sub="cadastrados" grad="grad-blue" icon="👥" />
+        <KpiCard label="Carteira total"    value={fmtInt(s.tCart)} sub={`${engine.carteiraByCpf.size} vendedores`} grad="grad-emerald" icon="📒" />
+        <KpiCard label="Roteirizados"      value={fmtInt(s.tRot)} sub="planejados" grad="grad-violet" icon="🗺️" />
+        <KpiCard label="Vendas no período" value={fmtMoney(s.tValor)} sub={`${engine.periodoVendasDias} dias · ref ${fmtDate(engine.refDate)}`} grad="grad-amber" icon="💰" />
+      </div>
+      <div className="grid md:grid-cols-4 gap-4 mb-5">
+        <KpiCard label="Em dia (≤30d)"    value={fmtInt(s.c.EM_DIA)}  sub="proxy última compra" grad="grad-emerald" />
+        <KpiCard label="Atenção (31–90d)" value={fmtInt(s.c.ATENCAO)} sub="proxy última compra" grad="grad-amber" />
+        <KpiCard label="Crítico 90+"      value={fmtInt(s.c.CRITICO)} sub="prioridade de recuperação" grad="grad-rose" />
+        <KpiCard label="Sem histórico"    value={fmtInt(s.c.SEM_HIST)} sub="sem visita nem venda" grad="grad-slate" />
+      </div>
+      <div className="glass rounded-2xl p-5">
+        <div className="font-bold mb-3">Transparência das fontes (v3)</div>
+        <ul className="text-sm space-y-1.5 text-slate-300">
+          <li>📍 <b>Data de referência:</b> {fmtDate(engine.refDate)} — maior data observada em Vendas.</li>
+          <li>📅 <b>Janela de vendas:</b> {engine.periodoVendasDias} dias — usada para calcular DOH (days on hand).</li>
+          <li>🧭 <b>Histórico de visitas:</b> não disponível — usamos última venda como proxy. Toda regra 90+ é proxy comercial.</li>
+          <li>📊 <b>Estoque alto:</b> agora calculado por <b>DOH = qtd ÷ venda média diária</b>. Saudável ≤45d, alto 45–90d, crítico &gt;90d.</li>
+          <li>📰 <b>Jornalzinho:</b> descontos extraídos do PDF, <b>preços de lista vêm da planilha</b>. Não inventamos valores.</li>
+          <li>🖼️ <b>Imagens de produto:</b> via OpenFoodFacts (API gratuita). Fallback para link Google Imagens se não houver foto cadastrada.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   BRIEFING — MAIN SCREEN (lista + mapa + detalhes)
+   Tudo em uma tela. Vendedor low-tech: clique simples, sem chat.
+   ============================================================ */
+function Briefing({ engine, seller, promos, campanhas = [] }) {
+  const [selectedCnpj, setSelectedCnpj] = useState(null);
+  const [incluidos, setIncluidos] = useState(new Set());  // checkbox: clientes a visitar hoje
+  const [geo, setGeo] = useState({});
+  const [geoProgress, setGeoProgress] = useState(null);
+  const [route, setRoute] = useState(null);
+  const [otimizado, setOtimizado] = useState(false);
+  const [ordemOtim, setOrdemOtim] = useState(null);
+  const [ordemManual, setOrdemManual] = useState(null);   // array de cnpjs em ordem custom
+  const [dragOver, setDragOver] = useState(null);         // cnpj sobre o qual está arrastando
+  const [visitas, setVisitas] = useState({});             // { cnpj: { status, checkIn, checkOut } }
+  const mapRef = useRef(null);
+  const mapObjRef = useRef(null);
+  const markersRef = useRef([]);
+  const polyRef = useRef(null);
+
+  const lista = useMemo(() => {
+    if (!seller) return [];
+    return engine.clientesDoVendedor(seller)
+      .map(c => ({ ...c, score: engine.scoreCliente(c) }))
+      .sort((a,b) => {
+        if (a.noRoteiro !== b.noRoteiro) return a.noRoteiro ? -1 : 1; // roteiro primeiro
+        return b.score.total - a.score.total;
+      });
+  }, [engine, seller]);
+
+  // Inicializa: marcar todos do roteiro como incluídos
+  useEffect(() => {
+    if (!seller) { setIncluidos(new Set()); setSelectedCnpj(null); return; }
+    const s = new Set();
+    lista.forEach(c => { if (c.noRoteiro) s.add(c.cnpj); });
+    setIncluidos(s);
+    setRoute(null); setOrdemOtim(null); setOtimizado(false);
+    setSelectedCnpj(lista[0]?.cnpj || null);
+  }, [seller, lista]);
+
+  const sel = lista.find(c => c.cnpj === selectedCnpj);
+
+  // Ref callback do mapa: inicializa Leaflet assim que o <div> entra no DOM
+  // (resolve bug: useEffect com [] rodava antes do div existir nos primeiros renders)
+  const mapRefCallback = useCallback((el) => {
+    mapRef.current = el;
+    if (el && !mapObjRef.current && window.L) {
+      const m = window.L.map(el, { zoomControl: true }).setView([-23.55, -46.63], 11);
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19, attribution: "© OpenStreetMap · OSRM",
+      }).addTo(m);
+      mapObjRef.current = m;
+      // força recalculo de tamanho depois que o layout estabilizou
+      setTimeout(() => m.invalidateSize(), 200);
+    }
+  }, []);
+
+  // Lista de clientes incluídos — prioridade: otimizada > manual > natural
+  const incluidosLista = useMemo(() => {
+    const arr = lista.filter(c => incluidos.has(c.cnpj));
+    const map = new Map(arr.map(c => [c.cnpj, c]));
+    if (ordemOtim) return ordemOtim.map(cnpj => map.get(cnpj)).filter(Boolean);
+    if (ordemManual) {
+      const inOrder = ordemManual.filter(c => incluidos.has(c)).map(c => map.get(c)).filter(Boolean);
+      const notInOrder = arr.filter(c => !ordemManual.includes(c.cnpj));
+      return [...inOrder, ...notInOrder];
+    }
+    return arr;
+  }, [lista, incluidos, ordemOtim, ordemManual]);
+
+  // Reset ordem quando seller troca
+  useEffect(() => { setOrdemManual(null); }, [seller]);
+
+  // Carrega visitas do dia ao trocar vendedor
+  useEffect(() => {
+    const all = loadVisitasAll();
+    const sk = seller?.internal_code || "default";
+    const dk = todayKey();
+    setVisitas(all[sk]?.[dk] || {});
+  }, [seller]);
+
+  const persistVisitas = (novo) => {
+    setVisitas(novo);
+    const all = loadVisitasAll();
+    const sk = seller?.internal_code || "default";
+    const dk = todayKey();
+    if (!all[sk]) all[sk] = {};
+    all[sk][dk] = novo;
+    saveVisitasAll(all);
+  };
+  const handleCheckIn = (cnpj) => {
+    persistVisitas({ ...visitas, [cnpj]: { ...(visitas[cnpj]||{}), status: "em_visita", checkIn: Date.now() } });
+  };
+  const handleCheckOut = (cnpj, opts = {}) => {
+    const novo = { ...visitas, [cnpj]: { ...(visitas[cnpj]||{}), status: "concluido", checkOut: Date.now() } };
+    persistVisitas(novo);
+    if (opts.abrirProximo !== false) abrirProximoNoMaps(cnpj, novo);
+  };
+  const handleResetVisita = (cnpj) => {
+    const novo = { ...visitas };
+    delete novo[cnpj];
+    persistVisitas(novo);
+  };
+  // calcula próximo cliente pendente (após o atual) e abre Google Maps
+  const abrirProximoNoMaps = (cnpjAtual, visitasNovo) => {
+    const ordem = incluidosLista.map(c => c.cnpj);
+    const idx = ordem.indexOf(cnpjAtual);
+    let proximo = null;
+    for (let i = idx+1; i < ordem.length; i++) {
+      const st = visitasNovo[ordem[i]]?.status;
+      if (st !== "concluido") { proximo = incluidosLista[i]; break; }
+    }
+    if (!proximo) {
+      // sem próximo: avisa
+      alert("🎉 Rota concluída! Você visitou todos os clientes do dia.");
+      return;
+    }
+    const g = geo[buildAddressQuery(proximo.cli)];
+    let url;
+    if (g?.lat) url = mapsDestinationUrl({ lat: g.lat, lon: g.lon });
+    else {
+      const addr = [proximo.cli.address, proximo.cli.neighborhood, proximo.cli.city, proximo.cli.state].filter(Boolean).join(", ");
+      url = mapsDestinationUrl(addr);
+    }
+    window.open(url, "_blank");
+  };
+  // navegar para qualquer cliente da rota (botão "Ir até aqui")
+  const navegarPara = (cnpj) => {
+    const c = incluidosLista.find(x => x.cnpj === cnpj) || lista.find(x => x.cnpj === cnpj);
+    if (!c) return;
+    const g = geo[buildAddressQuery(c.cli)];
+    let url;
+    if (g?.lat) url = mapsDestinationUrl({ lat: g.lat, lon: g.lon });
+    else {
+      const addr = [c.cli.address, c.cli.neighborhood, c.cli.city, c.cli.state].filter(Boolean).join(", ");
+      url = mapsDestinationUrl(addr);
+    }
+    window.open(url, "_blank");
+  };
+  // abre rota completa no Google Maps (com trânsito ao vivo nativo)
+  const abrirRotaCompletaTransito = () => {
+    const pts = incluidosLista.filter(c => visitas[c.cnpj]?.status !== "concluido")
+                              .map(c => geo[buildAddressQuery(c.cli)])
+                              .filter(p => p?.lat);
+    const url = mapsRotaCompletaUrl(pts);
+    if (!url) { alert("Marque clientes na rota e geocodifique primeiro."); return; }
+    window.open(url, "_blank");
+  };
+
+  // Atualiza pinos do mapa
+  useEffect(() => {
+    const m = mapObjRef.current;
+    if (!m || !window.L) return;
+    // limpa marcadores e rota anteriores
+    markersRef.current.forEach(mk => { try { m.removeLayer(mk); } catch(e) {} });
+    markersRef.current = [];
+    if (polyRef.current) { try { m.removeLayer(polyRef.current); } catch(e) {} polyRef.current = null; }
+
+    // Camada cinza: TODOS os clientes geocodificados (mesmo não marcados) — referência visual
+    const naoMarcados = lista.filter(c => !incluidos.has(c.cnpj));
+    naoMarcados.forEach(c => {
+      const g = geo[buildAddressQuery(c.cli)];
+      if (!g?.lat) return;
+      const icon = window.L.divIcon({
+        className:"",
+        html:`<div style="background:#64748b;color:white;border-radius:50%;width:14px;height:14px;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>`,
+        iconSize:[14,14], iconAnchor:[7,7],
+      });
+      const mk = window.L.marker([g.lat, g.lon], { icon, opacity: 0.7 })
+        .bindPopup(`<div style="color:#1e293b"><b>${c.cli.name}</b><br/><i>fora da rota do dia — marque para incluir</i></div>`);
+      mk.on("click", () => setSelectedCnpj(c.cnpj));
+      mk.addTo(m); markersRef.current.push(mk);
+    });
+
+    // Marcadores numerados dos incluídos — agora consideram status de visita
+    const coords = [];
+    incluidosLista.forEach((c, idx) => {
+      const g = geo[buildAddressQuery(c.cli)];
+      if (!g?.lat) return;
+      coords.push({ lat: g.lat, lon: g.lon });
+      const visitaStatus = visitas[c.cnpj]?.status;
+      let cls, conteudo = idx+1;
+      const size = visitaStatus === "em_visita" ? 38 : 30;
+      if (visitaStatus === "concluido") { cls = "concluido"; conteudo = "✓"; }
+      else if (visitaStatus === "em_visita") { cls = "atendendo"; conteudo = "📍"; }
+      else {
+        cls = c.status==="CRITICO" ? "critico" : c.status==="ATENCAO" ? "atencao" : "em-dia";
+      }
+      const icon = window.L.divIcon({
+        className:"",
+        html:`<div class="route-pin ${cls}">${conteudo}</div>`,
+        iconSize:[size,size], iconAnchor:[size/2,size/2],
+      });
+      const popupVisita = visitaStatus === "concluido"
+        ? `<div style='background:#dcfce7;color:#166534;padding:4px;border-radius:4px;margin-top:4px'>✓ Concluído ${fmtHora(visitas[c.cnpj]?.checkIn)} → ${fmtHora(visitas[c.cnpj]?.checkOut)}</div>`
+        : visitaStatus === "em_visita"
+        ? `<div style='background:#dbeafe;color:#1e3a8a;padding:4px;border-radius:4px;margin-top:4px'>📍 Em visita desde ${fmtHora(visitas[c.cnpj]?.checkIn)}</div>`
+        : `<div style='color:#64748b;margin-top:4px'>Pendente</div>`;
+      const mk = window.L.marker([g.lat, g.lon], { icon })
+        .bindPopup(`<div style="color:#1e293b;min-width:200px"><b>${idx+1}. ${c.cli.name}</b><br/><span style='font-size:11px;color:#64748b'>#${c.cli.external_code||"—"}</span><br/>${c.cli.address||""}, ${c.cli.neighborhood||""}<br/>${c.cli.city||""}/${c.cli.state||""}<br/><i>${STATUS_LABEL[c.status]||""}</i>${popupVisita}</div>`);
+      mk.on("click", () => setSelectedCnpj(c.cnpj));
+      mk.addTo(m); markersRef.current.push(mk);
+    });
+
+    // Rota desenhada
+    if (route?.geometry?.coordinates?.length) {
+      const ll = route.geometry.coordinates.map(c => [c[1], c[0]]);
+      polyRef.current = window.L.polyline(ll, { color:"#3b82f6", weight:4, opacity:0.85 }).addTo(m);
+      try { m.fitBounds(polyRef.current.getBounds(), { padding:[30,30] }); } catch(e) {}
+    } else if (coords.length>0) {
+      // sem rota OSRM: fit nos pinos e desenha linha tracejada
+      try {
+        const grp = window.L.featureGroup(markersRef.current.filter(mk => mk));
+        const bounds = grp.getBounds();
+        if (bounds.isValid()) m.fitBounds(bounds, { padding:[30,30] });
+      } catch(e) {}
+      if (coords.length>1) {
+        polyRef.current = window.L.polyline(coords.map(c=>[c.lat,c.lon]), { color:"#64748b", weight:2, dashArray:"6,8", opacity:0.7 }).addTo(m);
+      }
+    } else if (Object.keys(geo).filter(k => geo[k]?.lat).length>0) {
+      // só pontos cinza (não marcados): ainda assim faz fit pra mostrar
+      try {
+        const grp = window.L.featureGroup(markersRef.current.filter(mk => mk));
+        const bounds = grp.getBounds();
+        if (bounds.isValid()) m.fitBounds(bounds, { padding:[30,30] });
+      } catch(e) {}
+    }
+    // garante que tiles sejam recalculados
+    setTimeout(() => { try { m.invalidateSize(); } catch(e) {} }, 100);
+  }, [incluidosLista, geo, route, lista, incluidos]);
+
+  // Geocodifica TODOS os clientes (não só marcados), depois calcula rota automaticamente
+  const [geoFailed, setGeoFailed] = useState([]);
+  const handleGeocode = async () => {
+    // Pré-carrega cache no estado
+    const cache = loadGeo();
+    const pre = {...geo};
+    lista.forEach(c => {
+      const k = buildAddressQuery(c.cli);
+      if (cache[k]?.lat) pre[k] = cache[k];
+    });
+    setGeo(pre);
+
+    setGeoProgress({ done:0, total: lista.length });
+    setGeoFailed([]);
+    const { out, failed } = await geocodeBatch(
+      lista.map(c => c.cli),
+      (d,t,f) => setGeoProgress({ done:d, total:t, failed: f?.length || 0 })
+    );
+    const merged = { ...pre, ...out };
+    setGeo(merged);
+    setGeoFailed(failed);
+    setGeoProgress(null);
+
+    // Auto: calcular rota planejada (ordem da lista de incluídos)
+    setOrdemOtim(null); setOtimizado(false);
+    const ptsIncl = incluidosLista.map(c => merged[buildAddressQuery(c.cli)]).filter(p => p?.lat);
+    if (ptsIncl.length >= 2) {
+      try { const r = await osrmRoute(ptsIncl); setRoute(r); }
+      catch (e) { console.warn("OSRM falhou", e); }
+    }
+  };
+  const handleOtimizar = async () => {
+    const pts = incluidosLista.map(c => geo[buildAddressQuery(c.cli)]).filter(p => p?.lat);
+    if (pts.length<2) { alert("Marque ao menos 2 clientes na rota e clique Geocodificar antes."); return; }
+    const cnpjs = incluidosLista.filter(c => geo[buildAddressQuery(c.cli)]?.lat).map(c => c.cnpj);
+    const order = nearestNeighborOrder(pts, 0);
+    const cnpjOrder = order.map(i => cnpjs[i]);
+    setOrdemOtim(cnpjOrder); setOtimizado(true);
+    setOrdemManual(null);  // otimização sobrescreve manual
+    const coordsOrder = order.map(i => pts[i]);
+    try { const r = await osrmRoute(coordsOrder); setRoute(r); }
+    catch (e) { console.warn("OSRM falhou", e); }
+  };
+  const handleRotaPlan = async () => {
+    setOrdemOtim(null); setOtimizado(false);
+    const pts = incluidosLista.map(c => geo[buildAddressQuery(c.cli)]).filter(p => p?.lat);
+    if (pts.length<2) { alert("Marque clientes na rota e clique Geocodificar antes."); return; }
+    try { const r = await osrmRoute(pts); setRoute(r); }
+    catch (e) { console.warn("OSRM falhou", e); }
+  };
+  const handleMapsLink = () => {
+    const pts = incluidosLista.map(c => geo[buildAddressQuery(c.cli)]).filter(p => p?.lat);
+    if (pts.length<2) { alert("Marque clientes na rota e geocodifique primeiro."); return; }
+    const o = `${pts[0].lat},${pts[0].lon}`;
+    const d = `${pts[pts.length-1].lat},${pts[pts.length-1].lon}`;
+    const w = pts.slice(1,-1).map(c=>`${c.lat},${c.lon}`).join("|");
+    window.open(`https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${o}&destination=${d}${w?`&waypoints=${encodeURIComponent(w)}`:""}`,"_blank");
+  };
+
+  const toggleCli = (cnpj) => {
+    const s = new Set(incluidos);
+    s.has(cnpj) ? s.delete(cnpj) : s.add(cnpj);
+    setIncluidos(s);
+    setOrdemOtim(null); setRoute(null); setOtimizado(false);
+  };
+
+  // ===== DRAG AND DROP =====
+  const handleDragStart = (e, cnpj, origin) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", JSON.stringify({ cnpj, origin }));
+  };
+  const handleDragOver = (e, overCnpj) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (overCnpj !== undefined) setDragOver(overCnpj);
+  };
+  const handleDragLeave = () => setDragOver(null);
+
+  // drop num item específico da rota → insere antes dele
+  const handleDropOnRouteItem = (e, targetCnpj) => {
+    e.preventDefault();
+    setDragOver(null);
+    let payload; try { payload = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+    const { cnpj } = payload;
+    if (!cnpj || cnpj === targetCnpj) return;
+    const newIncl = new Set(incluidos); newIncl.add(cnpj);
+    setIncluidos(newIncl);
+    // monta nova ordem
+    const baseOrder = incluidosLista.map(c => c.cnpj).filter(c => c !== cnpj);
+    const idx = baseOrder.indexOf(targetCnpj);
+    if (idx >= 0) baseOrder.splice(idx, 0, cnpj);
+    else baseOrder.push(cnpj);
+    setOrdemManual(baseOrder);
+    setOrdemOtim(null); setOtimizado(false); setRoute(null);
+  };
+  // drop no final da faixa → adiciona ao fim
+  const handleDropOnRouteEnd = (e) => {
+    e.preventDefault(); setDragOver(null);
+    let payload; try { payload = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+    const { cnpj } = payload;
+    if (!cnpj) return;
+    const newIncl = new Set(incluidos); newIncl.add(cnpj);
+    setIncluidos(newIncl);
+    const baseOrder = incluidosLista.map(c => c.cnpj).filter(c => c !== cnpj);
+    baseOrder.push(cnpj);
+    setOrdemManual(baseOrder);
+    setOrdemOtim(null); setOtimizado(false); setRoute(null);
+  };
+  // drop na coluna da carteira → remove da rota
+  const handleDropOnCarteira = (e) => {
+    e.preventDefault(); setDragOver(null);
+    let payload; try { payload = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+    const { cnpj, origin } = payload;
+    if (origin !== "rota" || !cnpj) return;
+    const newIncl = new Set(incluidos); newIncl.delete(cnpj);
+    setIncluidos(newIncl);
+    setOrdemOtim(null); setOtimizado(false); setRoute(null);
+  };
+  // mobile / fallback: mover ↑↓
+  const moveInRoute = (cnpj, dir) => {
+    const order = incluidosLista.map(c => c.cnpj);
+    const i = order.indexOf(cnpj);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    setOrdemManual(order);
+    setOrdemOtim(null); setOtimizado(false); setRoute(null);
+  };
+  const removeFromRoute = (cnpj) => {
+    const newIncl = new Set(incluidos); newIncl.delete(cnpj);
+    setIncluidos(newIncl);
+    setOrdemOtim(null); setOtimizado(false); setRoute(null);
+  };
+
+  const totalKm = route ? (route.distance_m/1000).toFixed(1) : null;
+  const totalMin = route ? Math.round(route.duration_s/60) : null;
+
+  // promos relevantes para o cliente selecionado
+  const promosDoCliente = useMemo(() => {
+    if (!sel || !promos.length) return [];
+    const eansComprados = new Set((sel.vendasCli||[]).map(v => v.ean));
+    return promos.filter(p => eansComprados.has(p.ean)).slice(0,6);
+  }, [sel, promos]);
+
+  // ===== ALERTAS ESTRATÉGICOS (cruzam rota planejada × informativo × recuperação 90+) =====
+  const alertas = useMemo(() => {
+    if (!incluidosLista.length) return { criticos: [], comInformativo: [], campanhaPossivel: [], totalOportunidades: 0 };
+    const eansPromos = new Set((promos||[]).map(p => p.ean));
+    const criticos = incluidosLista.filter(c => c.status === "CRITICO" || c.status === "SEM_HIST");
+    const comInformativo = incluidosLista
+      .map(c => {
+        const eansBatidos = (c.vendasCli||[])
+          .map(v => v.ean)
+          .filter(e => e && eansPromos.has(e));
+        const eansUnique = Array.from(new Set(eansBatidos));
+        return eansUnique.length ? { c, eans: eansUnique } : null;
+      })
+      .filter(Boolean);
+    // campanhas: clientes onde algum produto da cesta cita marca/nome da campanha
+    const campanhaPossivel = [];
+    if (campanhas?.length && engine?.prodByEan) {
+      incluidosLista.forEach(c => {
+        const cesta = new Set((c.vendasCli||[]).map(v => v.ean));
+        const aplica = new Set();
+        cesta.forEach(ean => {
+          const prod = engine.prodByEan.get(ean);
+          if (!prod) return;
+          const nome = (prod.name||"").toLowerCase();
+          const marca = (prod.brand||"").toLowerCase();
+          campanhas.forEach((camp, ci) => {
+            const t = (camp.texto||"").toLowerCase();
+            if ((marca && marca.length>3 && t.includes(marca)) ||
+                (nome && nome.length>5 && t.includes(nome.substring(0,15)))) {
+              aplica.add(ci+1);
+            }
+          });
+        });
+        if (aplica.size) campanhaPossivel.push({ c, campanhas: Array.from(aplica) });
+      });
+    }
+    // total de oportunidades de produto (soma para todos da rota)
+    let totalOp = 0;
+    incluidosLista.forEach(c => {
+      try { totalOp += engine.recomendaInteligente(c, promos, campanhas).totalOportunidades; }
+      catch (e) {}
+    });
+    return { criticos, comInformativo, campanhaPossivel, totalOportunidades: totalOp };
+  }, [incluidosLista, promos, campanhas, engine]);
+
+  // Early return DEPOIS de todos os hooks (Rules of Hooks)
+  if (!seller) return <div className="glass rounded-2xl p-6">Selecione um vendedor no topo.</div>;
+
+  return (
+    <div className="space-y-4">
+      {/* HEADER do vendedor */}
+      <div className="glass rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-xs text-slate-400">Vendedor</div>
+          <div className="text-xl font-bold">{seller.name}</div>
+          <div className="text-xs text-slate-400">Cod {seller.internal_code} · {lista.length} clientes na base · {incluidos.size} marcados para hoje</div>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={handleGeocode} disabled={!!geoProgress} className="big-btn grad-slate hover:bg-white/10">
+            {geoProgress ? `📍 ${geoProgress.done}/${geoProgress.total}${geoProgress.failed?` (${geoProgress.failed} sem match)`:""}…` : "📍 Geocodificar"}
+          </button>
+          <button onClick={handleRotaPlan} className="big-btn grad-blue text-white">🗺️ Calcular rota</button>
+          <button onClick={handleOtimizar} className="big-btn grad-emerald text-white">⚡ Otimizar por tempo</button>
+          <button onClick={handleMapsLink} className="big-btn bg-white text-slate-900">📍 Abrir Google Maps</button>
+        </div>
+      </div>
+
+      {(() => {
+        const geocodedTotal = lista.filter(c => geo[buildAddressQuery(c.cli)]?.lat).length;
+        const geocodedIncl = incluidosLista.filter(c => geo[buildAddressQuery(c.cli)]?.lat).length;
+        const inclSemGeo = incluidosLista.filter(c => !geo[buildAddressQuery(c.cli)]?.lat);
+        const incIds = incluidosLista.length;
+        const semEndereco = lista.filter(c => !c.cli?.address).length;
+        return (
+          <>
+            <div className="glass-strong rounded-xl px-4 py-2 text-sm flex items-center gap-4 flex-wrap">
+              <span>📍 Geocodificados: <b className="text-emerald-300">{geocodedTotal}</b>/{lista.length}{geocodedTotal<lista.length && <span className="text-slate-400 ml-1">({lista.length-geocodedTotal} pendentes)</span>}</span>
+              <span>🎯 Marcados na rota: <b>{incIds}</b> · <b className="text-emerald-300">{geocodedIncl}</b> no mapa{inclSemGeo.length>0 && <span className="text-rose-300 ml-1">({inclSemGeo.length} sem coords)</span>}</span>
+              {semEndereco>0 && <span className="text-amber-300">⚠️ {semEndereco} sem endereço</span>}
+              {route && <>
+                <span className="border-l border-white/10 pl-4">🚗 <b>{totalKm} km</b></span>
+                <span>⏱️ <b>{totalMin} min</b></span>
+                {otimizado && <span className="badge grad-promo">⚡ Otimizada</span>}
+              </>}
+              <button onClick={() => { try { localStorage.removeItem('ebd_geo_v3'); } catch(e){} setGeo({}); setRoute(null); setGeoFailed([]); }}
+                className="ml-auto text-[11px] text-slate-400 hover:text-white">🗑 Limpar cache</button>
+            </div>
+            {inclSemGeo.length > 0 && (
+              <details className="glass-strong rounded-xl px-4 py-2 text-xs">
+                <summary className="cursor-pointer text-rose-300 font-semibold">
+                  ⚠️ {inclSemGeo.length} cliente{inclSemGeo.length>1?"s":""} da sua rota sem coordenadas — não aparece{inclSemGeo.length>1?"m":""} no mapa
+                </summary>
+                <div className="mt-2 grid sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {inclSemGeo.map(c => (
+                    <div key={c.cnpj} className="glass-strong rounded p-2 cursor-pointer hover:bg-white/10" onClick={() => setSelectedCnpj(c.cnpj)}>
+                      <div className="font-semibold truncate">#{c.cli.external_code||"—"} {c.cli.name}</div>
+                      <div className="text-slate-400 text-[10px] truncate">{c.cli.address || "sem endereço"} · {c.cli.neighborhood||"—"} · CEP {c.cli.cep||"—"}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-2">
+                  Possíveis causas: endereço incompleto / sem número, CEP inválido, ou Nominatim sem registro. Tente <b>📍 Geocodificar</b> de novo após corrigir o cadastro do cliente.
+                </div>
+              </details>
+            )}
+          </>
+        );
+      })()}
+
+      {/* PAINEL DE PROGRESSO DA ROTA — copiloto do dia */}
+      {incluidosLista.length > 0 && (() => {
+        const concluidos = incluidosLista.filter(c => visitas[c.cnpj]?.status === "concluido");
+        const emVisita = incluidosLista.find(c => visitas[c.cnpj]?.status === "em_visita");
+        const proximoPendente = incluidosLista.find(c => {
+          const st = visitas[c.cnpj]?.status;
+          return st !== "concluido" && st !== "em_visita";
+        });
+        const proximo = emVisita || proximoPendente;
+        const pct = Math.round((concluidos.length / incluidosLista.length) * 100);
+        const tempos = concluidos
+          .map(c => { const v = visitas[c.cnpj]; return (v?.checkIn && v?.checkOut) ? (v.checkOut - v.checkIn) : null; })
+          .filter(Boolean);
+        const tempoMedio = tempos.length>0 ? tempos.reduce((a,b)=>a+b,0)/tempos.length : null;
+        const restantes = incluidosLista.length - concluidos.length;
+        const etaMs = tempoMedio ? tempoMedio * restantes : null;
+        return (
+          <div className="glass rounded-2xl p-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-4 flex-wrap">
+                <div>
+                  <div className="text-[10px] uppercase text-slate-400 font-bold">Rota do dia</div>
+                  <div className="text-2xl font-bold">{concluidos.length}<span className="text-slate-500 text-lg">/{incluidosLista.length}</span></div>
+                  <div className="text-[10px] text-slate-400">{pct}% concluído</div>
+                </div>
+                <div className="w-32 progress-bar">
+                  <div className="progress-fill" style={{ width: `${pct}%` }}></div>
+                </div>
+                {tempoMedio && <div className="text-xs"><div className="text-[10px] text-slate-400">Tempo médio/visita</div><div className="font-bold">{fmtDuracao(tempoMedio)}</div></div>}
+                {etaMs && restantes>0 && <div className="text-xs"><div className="text-[10px] text-slate-400">ETA fim do dia</div><div className="font-bold text-emerald-300">+{fmtDuracao(etaMs)}</div></div>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={abrirRotaCompletaTransito}
+                  className="big-btn grad-blue text-white" title="Abre Google Maps com a rota completa e trânsito ao vivo">
+                  🚦 Trânsito ao vivo
+                </button>
+                {proximo && (
+                  <button onClick={() => navegarPara(proximo.cnpj)}
+                    className="big-btn bg-emerald-600 hover:bg-emerald-500 text-white" title="Navegar até o próximo cliente">
+                    ▶️ Ir até próximo
+                  </button>
+                )}
+              </div>
+            </div>
+            {proximo && (
+              <div className="mt-3 rounded-xl border border-emerald-500/40 bg-emerald-900/20 px-3 py-2 flex items-center gap-3 cursor-pointer hover:bg-emerald-900/40"
+                   onClick={() => setSelectedCnpj(proximo.cnpj)}>
+                <div className="pulse-dot"></div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] uppercase text-emerald-300 font-bold">
+                    {emVisita ? "Em visita agora" : "Próxima parada"}
+                  </div>
+                  <div className="text-sm font-bold truncate">
+                    {incluidosLista.indexOf(proximo)+1}. <span className="text-blue-300">#{proximo.cli.external_code||"—"}</span> {proximo.cli.name}
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate">{proximo.cli.address||"—"} · {proximo.cli.neighborhood||"—"}</div>
+                </div>
+                {emVisita ? (
+                  <button onClick={(e) => { e.stopPropagation(); handleCheckOut(proximo.cnpj); }}
+                    className="checkin-btn bg-emerald-600 hover:bg-emerald-500 text-white shrink-0">
+                    ✅ Finalizar + próximo
+                  </button>
+                ) : (
+                  <button onClick={(e) => { e.stopPropagation(); handleCheckIn(proximo.cnpj); }}
+                    className="checkin-btn bg-blue-600 hover:bg-blue-500 text-white shrink-0">
+                    ▶️ Cheguei
+                  </button>
+                )}
+              </div>
+            )}
+            {!proximo && concluidos.length === incluidosLista.length && (
+              <div className="mt-3 rounded-xl bg-emerald-900/40 border border-emerald-500 px-3 py-2 text-sm font-bold text-emerald-200 text-center">
+                🎉 Rota concluída! {concluidos.length} clientes visitados hoje.
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ALERTAS ESTRATÉGICOS — cruza rota × recuperação × informativo × campanhas */}
+      {incluidosLista.length > 0 && (alertas.criticos.length>0 || alertas.comInformativo.length>0 || alertas.campanhaPossivel.length>0) && (
+        <div className="grid md:grid-cols-3 gap-3">
+          {alertas.criticos.length > 0 && (
+            <div className="glass-strong rounded-xl p-3 border-l-4 border-rose-500">
+              <div className="text-xs uppercase tracking-wider text-rose-300 font-bold mb-1">🚨 Recuperação na rota</div>
+              <div className="text-2xl font-bold">{alertas.criticos.length}</div>
+              <div className="text-xs text-slate-300 mb-2">cliente{alertas.criticos.length>1?"s":""} 90+ sem comprar na sua rota planejada</div>
+              <div className="flex flex-wrap gap-1">
+                {alertas.criticos.slice(0,4).map(c => (
+                  <button key={c.cnpj} onClick={() => setSelectedCnpj(c.cnpj)}
+                    className="text-[10px] bg-rose-900/40 hover:bg-rose-800 text-rose-100 px-2 py-0.5 rounded">
+                    #{c.cli.external_code||"—"} {c.cli.name.split(" ").slice(0,2).join(" ")}
+                  </button>
+                ))}
+                {alertas.criticos.length>4 && <span className="text-[10px] text-slate-400">+{alertas.criticos.length-4}</span>}
+              </div>
+            </div>
+          )}
+          {alertas.comInformativo.length > 0 && (
+            <div className="glass-strong rounded-xl p-3 border-l-4 border-amber-500">
+              <div className="text-xs uppercase tracking-wider text-amber-300 font-bold mb-1">📰 Cesta × Informativo</div>
+              <div className="text-2xl font-bold">{alertas.comInformativo.length}</div>
+              <div className="text-xs text-slate-300 mb-2">cliente{alertas.comInformativo.length>1?"s":""} já compra{alertas.comInformativo.length>1?"m":""} item em destaque no informativo</div>
+              <div className="flex flex-wrap gap-1">
+                {alertas.comInformativo.slice(0,4).map(({c, eans}) => (
+                  <button key={c.cnpj} onClick={() => setSelectedCnpj(c.cnpj)}
+                    className="text-[10px] bg-amber-900/40 hover:bg-amber-800 text-amber-100 px-2 py-0.5 rounded"
+                    title={`${eans.length} item(ns) em comum`}>
+                    #{c.cli.external_code||"—"} ({eans.length})
+                  </button>
+                ))}
+                {alertas.comInformativo.length>4 && <span className="text-[10px] text-slate-400">+{alertas.comInformativo.length-4}</span>}
+              </div>
+            </div>
+          )}
+          {alertas.campanhaPossivel.length > 0 && (
+            <div className="glass-strong rounded-xl p-3 border-l-4 border-violet-500">
+              <div className="text-xs uppercase tracking-wider text-violet-300 font-bold mb-1">🏆 Campanhas aplicáveis</div>
+              <div className="text-2xl font-bold">{alertas.campanhaPossivel.length}</div>
+              <div className="text-xs text-slate-300 mb-2">cliente{alertas.campanhaPossivel.length>1?"s":""} com produto da cesta ligado a campanha</div>
+              <div className="flex flex-wrap gap-1">
+                {alertas.campanhaPossivel.slice(0,4).map(({c, campanhas}) => (
+                  <button key={c.cnpj} onClick={() => setSelectedCnpj(c.cnpj)}
+                    className="text-[10px] bg-violet-900/40 hover:bg-violet-800 text-violet-100 px-2 py-0.5 rounded">
+                    #{c.cli.external_code||"—"} (C{campanhas.join(",C")})
+                  </button>
+                ))}
+                {alertas.campanhaPossivel.length>4 && <span className="text-[10px] text-slate-400">+{alertas.campanhaPossivel.length-4}</span>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LAYOUT 3 colunas: (Sequência + Carteira) | Mapa | Detalhes */}
+      <div className="grid grid-cols-12 gap-4">
+
+        {/* COLUNA 1 — Sequência da rota (em cima) + Carteira/disponíveis (embaixo) */}
+        <div className="col-span-12 lg:col-span-3 space-y-4">
+
+          {/* BLOCO 1: SEQUÊNCIA DA ROTA — vertical, drag-and-drop */}
+          <div className="glass rounded-2xl"
+               onDragOver={(e) => handleDragOver(e)}
+               onDrop={handleDropOnRouteEnd}>
+            <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between flex-wrap gap-1">
+              <div className="font-bold text-sm">
+                🛣️ Sequência <span className="badge bg-blue-900 text-blue-200 ml-1">{incluidosLista.length}</span>
+                {ordemManual && !ordemOtim && <span className="ml-1 badge bg-violet-800 text-violet-100 text-[9px]">manual</span>}
+                {ordemOtim && <span className="ml-1 badge grad-promo text-[9px]">otimizada</span>}
+              </div>
+            </div>
+            <div className="text-[10px] text-slate-400 px-3 py-1.5 border-b border-white/5">
+              Arraste para reordenar · ↑↓ ajusta · × remove
+            </div>
+            <div className="max-h-[40vh] overflow-y-auto scroll-thin">
+              {incluidosLista.length === 0 ? (
+                <div className="text-xs text-slate-400 text-center py-6 px-3 border-2 border-dashed border-white/10 rounded-xl m-3">
+                  Marque clientes com ✓ ou arraste para cá
+                </div>
+              ) : (
+                <div className="divide-y divide-white/5">
+                  {incluidosLista.map((c, idx) => {
+                    const isOver = dragOver === c.cnpj;
+                    const isSel = selectedCnpj === c.cnpj;
+                    const eansPromos = new Set((promos||[]).map(p => p.ean));
+                    const temInformativo = (c.vendasCli||[]).some(v => eansPromos.has(v.ean));
+                    const visita = visitas[c.cnpj];
+                    const visitaStatus = visita?.status; // pendente | em_visita | concluido
+                    const isConcluida = visitaStatus === "concluido";
+                    const isEmVisita = visitaStatus === "em_visita";
+                    const corNum = isConcluida ? "bg-slate-500" : isEmVisita ? "bg-blue-600" :
+                                   c.status==="CRITICO" ? "bg-rose-600" :
+                                   c.status==="ATENCAO" ? "bg-amber-600" :
+                                   c.status==="SEM_HIST" ? "bg-slate-500" : "bg-emerald-600";
+                    return (
+                      <div key={c.cnpj}
+                        draggable={!isConcluida}
+                        onDragStart={(e) => handleDragStart(e, c.cnpj, "rota")}
+                        onDragOver={(e) => handleDragOver(e, c.cnpj)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDropOnRouteItem(e, c.cnpj)}
+                        onClick={() => setSelectedCnpj(c.cnpj)}
+                        className={`px-2 py-1.5 ${!isConcluida ? "cursor-move" : "cursor-pointer"} hover:bg-white/5 ${isOver ? "ring-2 ring-blue-400 ring-inset" : ""} ${isSel ? "bg-blue-900/30 border-l-2 border-blue-400" : ""} ${isConcluida ? "opacity-50" : ""} ${isEmVisita ? "bg-blue-900/30 border-l-2 border-blue-400" : ""}`}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] shrink-0 text-white ${corNum} ${isEmVisita?"ring-2 ring-blue-300":""}`}>
+                            {isConcluida ? "✓" : isEmVisita ? "📍" : idx+1}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className={`text-[11px] font-semibold truncate ${isConcluida?"line-through":""}`}>
+                              <span className="text-blue-300">#{c.cli.external_code||"—"}</span> {c.cli.name}
+                            </div>
+                            <div className="text-[9px] text-slate-400 truncate flex items-center gap-1">
+                              <span className="truncate">{c.cli.neighborhood||"—"}</span>
+                              {c.status==="CRITICO" && <span className="badge bg-rose-900 text-rose-200 text-[8px] px-1 py-0">90+</span>}
+                              {temInformativo && <span title="cesta tem item do informativo" className="text-amber-400">📰</span>}
+                            </div>
+                          </div>
+                          {!isConcluida && (
+                            <div className="flex flex-col gap-0.5 shrink-0">
+                              <button onClick={(e) => { e.stopPropagation(); moveInRoute(c.cnpj, -1); }} disabled={idx===0}
+                                className="w-4 h-3.5 rounded text-[9px] bg-white/5 hover:bg-white/15 disabled:opacity-30 leading-none" title="Subir">↑</button>
+                              <button onClick={(e) => { e.stopPropagation(); moveInRoute(c.cnpj, 1); }} disabled={idx===incluidosLista.length-1}
+                                className="w-4 h-3.5 rounded text-[9px] bg-white/5 hover:bg-white/15 disabled:opacity-30 leading-none" title="Descer">↓</button>
+                            </div>
+                          )}
+                          {!isConcluida && (
+                            <button onClick={(e) => { e.stopPropagation(); removeFromRoute(c.cnpj); }}
+                              className="w-4 h-4 rounded-full bg-rose-800 hover:bg-rose-600 text-white text-[9px] flex items-center justify-center shrink-0" title="Remover">×</button>
+                          )}
+                        </div>
+                        {/* Botões check-in/out */}
+                        <div className="mt-1 flex gap-1">
+                          {!visitaStatus && (
+                            <button onClick={(e) => { e.stopPropagation(); handleCheckIn(c.cnpj); navegarPara(c.cnpj); }}
+                              className="checkin-btn flex-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] py-1">
+                              ▶️ Cheguei
+                            </button>
+                          )}
+                          {isEmVisita && (
+                            <>
+                              <span className="checkin-btn flex-1 bg-blue-900/50 text-blue-100 text-[10px] py-1 cursor-default">
+                                📍 Em visita · {fmtHora(visita.checkIn)}
+                              </span>
+                              <button onClick={(e) => { e.stopPropagation(); handleCheckOut(c.cnpj); }}
+                                className="checkin-btn bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] py-1 px-2">
+                                ✅ Sair
+                              </button>
+                            </>
+                          )}
+                          {isConcluida && (
+                            <span className="checkin-btn flex-1 bg-slate-700 text-slate-200 text-[10px] py-1 cursor-default" title="Reabrir? clique para resetar"
+                                  onClick={(e)=>{ e.stopPropagation(); if (confirm("Reabrir esta visita?")) handleResetVisita(c.cnpj); }}>
+                              ✓ Concluído · {fmtDuracao(visita.checkOut - visita.checkIn)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div onDragOver={(e) => handleDragOver(e)} onDrop={handleDropOnRouteEnd}
+                    className="text-[10px] text-slate-500 text-center py-2 border-t border-dashed border-white/10">
+                    ➕ arraste aqui para incluir
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* BLOCO 2: CARTEIRA / DISPONÍVEIS — drag source */}
+          <div className="glass rounded-2xl"
+               onDragOver={(e) => handleDragOver(e)}
+               onDrop={handleDropOnCarteira}>
+            <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
+              <span className="font-bold text-sm">📒 Carteira</span>
+              <span className="badge bg-slate-700 text-slate-200">{lista.length - incluidos.size} fora · {incluidos.size} na rota</span>
+            </div>
+            <div className="max-h-[35vh] overflow-y-auto scroll-thin divide-y divide-white/5">
+              {lista.map((c) => {
+                const isInc = incluidos.has(c.cnpj);
+                const isSel = c.cnpj === selectedCnpj;
+                return (
+                  <div key={c.cnpj} className={`client-card px-2 py-1.5 flex items-start gap-2 ${isSel?"selected":""} ${isInc?"opacity-40":""}`}
+                       draggable={!isInc}
+                       onDragStart={(e) => handleDragStart(e, c.cnpj, "carteira")}
+                       onClick={() => setSelectedCnpj(c.cnpj)}
+                       title={isInc ? "Já está na rota" : "Arraste ou clique no ✓"}>
+                    <div className={`checkbox mt-0.5 ${isInc?"checked":""}`} onClick={(e)=>{e.stopPropagation(); toggleCli(c.cnpj);}}>
+                      {isInc && <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6l3 3 5-6" stroke="white" strokeWidth="2" fill="none"/></svg>}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] font-semibold truncate">
+                        <span className="text-blue-300 mr-1">#{c.cli.external_code||"—"}</span>
+                        {c.cli.name}
+                      </div>
+                      <div className="text-[9px] text-slate-400 truncate">{c.cli.ramo||c.cli.tag||"—"} · {c.cli.neighborhood||"—"}</div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <StatusPill status={c.status} />
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-right shrink-0">
+                      <div className="font-bold text-white text-[11px]">{c.score.total}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* COLUNA 2 — Mapa */}
+        <div className="col-span-12 lg:col-span-5">
+          <div className="glass rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between flex-wrap gap-2">
+              <span className="font-bold text-sm">Mapa da rota</span>
+              <span className="text-[10px] text-slate-400">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1"></span>em dia
+                <span className="inline-block w-2 h-2 rounded-full bg-amber-500 ml-2 mr-1"></span>atenção
+                <span className="inline-block w-2 h-2 rounded-full bg-rose-500 ml-2 mr-1"></span>crítico
+                <span className="inline-block w-2 h-2 rounded-full bg-slate-500 ml-2 mr-1"></span>fora da rota
+              </span>
+            </div>
+            <div ref={mapRefCallback} style={{ height: "75vh", width: "100%" }} />
+          </div>
+        </div>
+
+        {/* COLUNA 3 — Detalhes do cliente selecionado */}
+        <div className="col-span-12 lg:col-span-4">
+          {!sel && <div className="glass rounded-2xl p-6 text-sm text-slate-400">Clique em um cliente da lista.</div>}
+          {sel && <DetalhesCliente engine={engine} c={sel} promos={promos} campanhas={campanhas}
+            visita={visitas[sel.cnpj]}
+            onCheckIn={() => { handleCheckIn(sel.cnpj); navegarPara(sel.cnpj); }}
+            onCheckOut={() => handleCheckOut(sel.cnpj)}
+            onReset={() => handleResetVisita(sel.cnpj)}
+            onNavegar={() => navegarPara(sel.cnpj)} />}
+        </div>
+      </div>
+
+      <div className="text-[11px] text-slate-500 px-1">
+        ⚠️ Histórico de visita real não disponível — toda regra 90+ é proxy via última venda. Geocoding via OpenStreetMap (1 req/s, cache local). Otimização por proximidade Nearest Neighbor — aproximação, não ótimo global.
+      </div>
+    </div>
+  );
+}
+
+/* DETALHES DO CLIENTE — com abas visuais, leitura rápida */
+function DetalhesCliente({ engine, c, promos = [], campanhas = [], visita, onCheckIn, onCheckOut, onReset, onNavegar }) {
+  const intel = useMemo(() => engine.recomendaInteligente(c, promos, campanhas), [engine, c, promos, campanhas]);
+  const [tab, setTab] = useState("sugestoes");
+  const [subtab, setSubtab] = useState("todas");
+  const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent([c.cli.address, c.cli.neighborhood, c.cli.city, c.cli.state, c.cli.cep].filter(Boolean).join(", "))}`;
+
+  const visitaStatus = visita?.status;
+  const isPendente = !visitaStatus;
+  const isEmVisita = visitaStatus === "em_visita";
+  const isConcluida = visitaStatus === "concluido";
+
+  // status color
+  const statusColor = c.status==="CRITICO" ? "rose" : c.status==="ATENCAO" ? "amber" : c.status==="SEM_HIST" ? "slate" : "emerald";
+  const acao = c.status==="CRITICO" ? "🚨 Recuperar 90+" :
+               c.status==="SEM_HIST" ? "❓ Confirmar atividade" :
+               c.naCarteira && !c.noRoteiro ? "➕ Avaliar inclusão" :
+               "🎯 Reposição + oferta";
+
+  // Filtra sugestões por subtab
+  const allSugestoes = [
+    ...intel.reposicao.map(r => ({...r, tipoLabel:"Reposição", tipoCor:"emerald", tipoIcone:"🔄"})),
+    ...intel.novoInformativo.map(r => ({...r, tipoLabel:"Novo", tipoCor:"amber", tipoIcone:"📰"})),
+    ...intel.recompra.map(r => ({...r, tipoLabel:"Recompra", tipoCor:"blue", tipoIcone:"🔁"})),
+    ...intel.campanha.map(r => ({...r, tipoLabel:"Campanha", tipoCor:"violet", tipoIcone:"🏆"})),
+  ];
+  const sugestoesFiltradas = subtab==="todas" ? allSugestoes
+    : subtab==="reposicao" ? intel.reposicao.map(r => ({...r, tipoLabel:"Reposição", tipoCor:"emerald", tipoIcone:"🔄"}))
+    : subtab==="novo" ? intel.novoInformativo.map(r => ({...r, tipoLabel:"Novo", tipoCor:"amber", tipoIcone:"📰"}))
+    : subtab==="recompra" ? intel.recompra.map(r => ({...r, tipoLabel:"Recompra", tipoCor:"blue", tipoIcone:"🔁"}))
+    : intel.campanha.map(r => ({...r, tipoLabel:"Campanha", tipoCor:"violet", tipoIcone:"🏆"}));
+
+  return (
+    <div className="glass rounded-2xl overflow-hidden flex flex-col" style={{ maxHeight: "calc(100vh - 200px)" }}>
+      {/* HEADER COMPACTO */}
+      <div className={`px-4 pt-3 pb-3 border-b border-white/10 bg-gradient-to-br from-${statusColor}-900/30 to-transparent`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-[10px] text-slate-400">
+              <span className="font-mono text-blue-300 text-xs">#{c.cli.external_code||"—"}</span>
+              <StatusPill status={c.status} />
+              <a href={mapsUrl} target="_blank" rel="noopener" className="text-blue-300 hover:underline ml-auto">📍 Maps ↗</a>
+            </div>
+            <div className="text-base font-bold leading-tight mt-1">{c.cli.name}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{c.cli.cnpj_fmt}</div>
+            <div className="text-[10px] text-slate-300 mt-0.5">
+              <span className="badge bg-blue-900 text-blue-200 text-[9px]">{c.cli.ramo||c.cli.tag||"sem ramo"}</span>
+              <span className="ml-1">{c.cli.neighborhood||"—"} · {c.cli.city||"—"}/{c.cli.state||"—"}</span>
+            </div>
+          </div>
+        </div>
+        {/* Banner de ação + copiloto de visita */}
+        <div className={`mt-2 rounded-lg px-3 py-2 bg-${statusColor}-900/40 border border-${statusColor}-800/50`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-bold">{acao}</div>
+            <div className="text-[10px] text-slate-300">
+              <b>{intel.totalOportunidades}</b> oportunidade{intel.totalOportunidades===1?"":"s"}
+            </div>
+          </div>
+          {/* Botões de copiloto */}
+          {onCheckIn && (
+            <div className="flex gap-2 items-center">
+              {isPendente && (
+                <>
+                  <button onClick={onCheckIn}
+                    className="flex-1 checkin-btn bg-blue-600 hover:bg-blue-500 text-white text-sm py-2.5">
+                    🚗 Cheguei + abrir Maps
+                  </button>
+                  <button onClick={onNavegar}
+                    className="checkin-btn bg-white/10 hover:bg-white/20 text-white text-xs py-2.5 px-3" title="Só abrir Maps sem fazer check-in">
+                    🗺️
+                  </button>
+                </>
+              )}
+              {isEmVisita && (
+                <>
+                  <div className="flex-1 text-xs">
+                    <div className="text-[10px] text-blue-300 uppercase font-bold">📍 Em visita</div>
+                    <div className="text-sm font-bold">Chegou às {fmtHora(visita.checkIn)}</div>
+                    <div className="text-[10px] text-slate-400">{fmtDuracao(Date.now() - visita.checkIn)} aqui</div>
+                  </div>
+                  <button onClick={onCheckOut}
+                    className="checkin-btn bg-emerald-600 hover:bg-emerald-500 text-white text-sm py-2.5 px-4">
+                    ✅ Finalizar + próximo
+                  </button>
+                </>
+              )}
+              {isConcluida && (
+                <>
+                  <div className="flex-1 text-xs">
+                    <div className="text-[10px] text-emerald-300 uppercase font-bold">✓ Concluído</div>
+                    <div className="text-sm font-bold">{fmtHora(visita.checkIn)} → {fmtHora(visita.checkOut)}</div>
+                    <div className="text-[10px] text-slate-400">Duração {fmtDuracao(visita.checkOut - visita.checkIn)}</div>
+                  </div>
+                  <button onClick={() => { if (confirm("Reabrir esta visita?")) onReset(); }}
+                    className="checkin-btn bg-white/10 hover:bg-white/20 text-white text-xs py-2.5 px-3">
+                    ↺ Reabrir
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* KPI ROW — compacto */}
+      <div className="px-3 py-2 grid grid-cols-3 gap-1.5 border-b border-white/10">
+        <div className="glass-strong rounded-lg p-1.5 text-center">
+          <div className="text-[9px] text-slate-400 uppercase">Última venda</div>
+          <div className="text-xs font-bold">{fmtDate(c.ultVenda)}</div>
+          <div className="text-[9px] text-slate-500">{c.diasSemVenda ?? "—"}d atrás</div>
+        </div>
+        <div className="glass-strong rounded-lg p-1.5 text-center">
+          <div className="text-[9px] text-slate-400 uppercase">Histórico</div>
+          <div className="text-xs font-bold text-emerald-300">{fmtMoney(c.totVenda)}</div>
+          <div className="text-[9px] text-slate-500">{c.numVenda||0} pedidos</div>
+        </div>
+        <div className="glass-strong rounded-lg p-1.5 text-center">
+          <div className="text-[9px] text-slate-400 uppercase">Score</div>
+          <div className="text-xs font-bold">{c.score.total}</div>
+          <div className="text-[9px] text-slate-500">prioridade</div>
+        </div>
+      </div>
+
+      {/* ABAS */}
+      <div className="flex border-b border-white/10 bg-white/5">
+        <TabBtn active={tab==="sugestoes"} onClick={()=>setTab("sugestoes")}
+          label={`💡 Sugestões`} badge={intel.totalOportunidades} />
+        <TabBtn active={tab==="perfil"} onClick={()=>setTab("perfil")} label="📋 Perfil" />
+        <TabBtn active={tab==="historico"} onClick={()=>setTab("historico")} label={`📜 Histórico`} badge={c.vendasCli.length} />
+      </div>
+
+      {/* CONTEÚDO DAS ABAS */}
+      <div className="flex-1 overflow-y-auto scroll-thin">
+        {tab==="sugestoes" && (
+          <>
+            {/* Filtros sub-aba */}
+            {intel.totalOportunidades>0 && (
+              <div className="px-3 py-2 border-b border-white/5 flex gap-1 overflow-x-auto scroll-thin">
+                <SubTabBtn active={subtab==="todas"} onClick={()=>setSubtab("todas")} label="Todas" n={allSugestoes.length} cor="blue" />
+                {intel.reposicao.length>0 && <SubTabBtn active={subtab==="reposicao"} onClick={()=>setSubtab("reposicao")} label="🔄 Reposição" n={intel.reposicao.length} cor="emerald" />}
+                {intel.novoInformativo.length>0 && <SubTabBtn active={subtab==="novo"} onClick={()=>setSubtab("novo")} label="📰 Novo" n={intel.novoInformativo.length} cor="amber" />}
+                {intel.recompra.length>0 && <SubTabBtn active={subtab==="recompra"} onClick={()=>setSubtab("recompra")} label="🔁 Recompra" n={intel.recompra.length} cor="blue" />}
+                {intel.campanha.length>0 && <SubTabBtn active={subtab==="campanha"} onClick={()=>setSubtab("campanha")} label="🏆 Campanha" n={intel.campanha.length} cor="violet" />}
+              </div>
+            )}
+            {sugestoesFiltradas.length===0 && (
+              <div className="px-4 py-6 text-xs text-slate-400 text-center">
+                Nenhuma oportunidade detectada. Carregue o jornalzinho na aba <b>Informativo</b> para ativar reposição/novo/campanha.
+              </div>
+            )}
+            <div className="px-3 py-2 space-y-2">
+              {sugestoesFiltradas.map(r => <ProductCard key={r.ean+"-"+r.tipo} r={r} />)}
+            </div>
+          </>
+        )}
+
+        {tab==="perfil" && (
+          <div className="px-4 py-3 space-y-3">
+            <div>
+              <div className="text-[10px] uppercase text-slate-400 font-semibold mb-1">Endereço</div>
+              <div className="text-xs text-slate-200">{c.cli.address || "—"}</div>
+              <div className="text-[11px] text-slate-400">{c.cli.neighborhood||"—"} · {c.cli.city||"—"}/{c.cli.state||"—"} · CEP {c.cli.cep||"—"}</div>
+              {c.cli.phone && <div className="text-[11px] text-slate-300 mt-1">📞 {c.cli.phone}</div>}
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-slate-400 font-semibold mb-1">Hierarquia comercial</div>
+              <div className="text-[11px] text-slate-300">Rota: <b>{c.cli.route_desc||"—"}</b></div>
+              <div className="text-[11px] text-slate-300">Praça: <b>{c.cli.square_desc||"—"}</b></div>
+              <div className="text-[11px] text-slate-300">Vendedor: <b>{c.cli.seller||"—"}</b></div>
+              <div className="text-[11px] text-slate-300">Supervisor: <b>{c.cli.supervisor||"—"}</b></div>
+              {c.cli.economic_group && c.cli.economic_group !== "SEM GRUPO ECONOMICO" && (
+                <div className="text-[11px] text-slate-300">Grupo: <b>{c.cli.economic_group}</b></div>
+              )}
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-slate-400 font-semibold mb-1">Motivo da prioridade</div>
+              <ul className="text-xs text-slate-300 list-disc list-inside space-y-0.5">
+                {c.score.motivos.map((m,i) => <li key={i}>{m}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-slate-400 font-semibold mb-1">Status na rota</div>
+              <div className="text-xs text-slate-300">
+                {c.noRoteiro ? "✅ Está no roteiro planejado" : "🔸 Fora do roteiro do período"}
+              </div>
+              <div className="text-xs text-slate-300">
+                {c.naCarteira ? "✅ Está na carteira oficial" : "🔸 Não consta na carteira"}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab==="historico" && (
+          <div className="px-3 py-2">
+            {c.vendasCli.length===0 ? (
+              <div className="text-xs text-slate-400 text-center py-6">Sem histórico de venda neste período.</div>
+            ) : (
+              <div className="space-y-1">
+                {c.vendasCli.slice(0,80).map((v,i) => {
+                  const prod = engine.prodByEan?.get(v.ean);
+                  return (
+                    <div key={i} className="glass-strong rounded p-2 flex items-center gap-2 text-[11px]">
+                      <ProductImage ean={v.ean} sku={v.sku} prod={prod} />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">{prod?.name || `SKU ${v.sku||v.ean}`}</div>
+                        <div className="text-[10px] text-slate-400">{fmtDate(v.date)} · EAN {v.ean}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-bold">{fmtMoney(v.valor)}</div>
+                        <div className="text-[10px] text-slate-400">{fmtInt(v.volume)} un</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {c.vendasCli.length>80 && <div className="text-[10px] text-slate-500 text-center py-2">+{c.vendasCli.length-80} pedidos…</div>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Botão de aba */
+function TabBtn({ active, onClick, label, badge }) {
+  return (
+    <button onClick={onClick}
+      className={`flex-1 px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${active ? "border-blue-400 text-white bg-white/5" : "border-transparent text-slate-400 hover:text-white hover:bg-white/5"}`}>
+      {label}
+      {badge !== undefined && badge !== null && badge > 0 && (
+        <span className="ml-1 inline-block bg-blue-700 text-white rounded-full px-1.5 py-0 text-[9px] min-w-[16px]">{badge}</span>
+      )}
+    </button>
+  );
+}
+function SubTabBtn({ active, onClick, label, n, cor }) {
+  const corMap = { blue:"bg-blue-700", emerald:"bg-emerald-700", amber:"bg-amber-700", violet:"bg-violet-700" };
+  return (
+    <button onClick={onClick}
+      className={`shrink-0 px-2.5 py-1 text-[11px] font-semibold rounded-full whitespace-nowrap ${active ? `${corMap[cor]||"bg-blue-700"} text-white` : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>
+      {label} <span className={`inline-block ${active?"bg-white/20":"bg-white/10"} rounded-full px-1.5 ml-1 text-[9px]`}>{n}</span>
+    </button>
+  );
+}
+
+/* Card de produto recomendado — compacto e visual */
+function ProductCard({ r }) {
+  const corMap = {
+    emerald:{ bg:"bg-emerald-900/20", border:"border-emerald-500", text:"text-emerald-300" },
+    amber:{   bg:"bg-amber-900/20",   border:"border-amber-500",   text:"text-amber-300" },
+    blue:{    bg:"bg-blue-900/20",    border:"border-blue-500",    text:"text-blue-300" },
+    violet:{  bg:"bg-violet-900/20",  border:"border-violet-500",  text:"text-violet-300" },
+  };
+  const cor = corMap[r.tipoCor] || corMap.blue;
+  return (
+    <div className={`rounded-lg p-2 border-l-4 ${cor.border} ${cor.bg} flex gap-2`}>
+      <ProductImage ean={r.ean} sku={r.sku} prod={r.prod} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-1 mb-0.5">
+          <span className={`badge ${cor.bg} ${cor.text} text-[9px] font-bold border ${cor.border}`}>{r.tipoIcone} {r.tipoLabel}</span>
+          <div className="flex gap-1">
+            {r.promo?.descontoPct && <span className="badge grad-promo text-[9px]">{Math.abs(r.promo.descontoPct)}% off</span>}
+            {r.campIdx && <span className="badge bg-violet-700 text-white text-[9px]">C{r.campIdx}</span>}
+          </div>
+        </div>
+        <div className="text-xs font-bold truncate">{r.prod?.name || `SKU ${r.sku||r.ean}`}</div>
+        <div className="text-[10px] text-slate-400 truncate">
+          EAN {r.ean}{r.sku?` · SKU ${r.sku}`:""}
+          {r.freq && <span className="ml-1">· {r.freq}× hist.</span>}
+          {r.countSimilares && <span className="ml-1">· {r.countSimilares} similares</span>}
+        </div>
+        {r.est && r.est.qtd>0 ? (
+          <div className="text-[10px] mt-0.5 flex items-center gap-2">
+            <span className="text-slate-300">📦 <b>{fmtInt(r.est.qtd)}</b></span>
+            <span className="text-emerald-300">{fmtMoney(r.est.list_price)}</span>
+            {r.promo?.precoPromoNum>0 && <span className="text-amber-300">→ {fmtMoney(r.promo.precoPromoNum)}</span>}
+          </div>
+        ) : <div className="text-[10px] text-amber-300 mt-0.5">⚠️ Sem estoque cadastrado</div>}
+        <div className="text-[10px] text-slate-500 mt-0.5 italic">{r.motivo}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   RECUPERAÇÃO 90+ — antes "Críticos 60+"
+   Permite filtrar por região/supervisor e MONTAR uma rota só de críticos.
+   ============================================================ */
+function Recuperacao({ engine, seller }) {
+  const [escopo, setEscopo] = useState("vendedor"); // vendedor | todos
+  const [bairroF, setBairroF] = useState("");
+  const lista = useMemo(() => {
+    let base;
+    if (escopo==="vendedor" && seller) base = engine.clientesDoVendedor(seller);
+    else {
+      base = [];
+      engine.cliByCnpj.forEach((cli, cnpj) => {
+        const v = engine.vendasByCnpj.get(cnpj) || [];
+        const ult = v.reduce((a,x)=>(x.date&&(!a||x.date>a))?x.date:a, null);
+        const dias = ult ? daysBetween(ult, engine.refDate) : null;
+        let st = "SEM_HIST";
+        if (ult) st = dias>90?"CRITICO":dias>30?"ATENCAO":"EM_DIA";
+        base.push({ cnpj, cli, ultVenda: ult, totVenda: v.reduce((a,x)=>a+x.valor,0), numVenda: v.length, diasSemVenda: dias, status: st, vendasCli: v, naCarteira: false, noRoteiro: false });
+      });
+    }
+    return base.map(c => ({...c, score: engine.scoreCliente(c)}))
+      .filter(c => c.status==="CRITICO" || c.status==="SEM_HIST")
+      .filter(c => !bairroF || (c.cli.neighborhood||"").toLowerCase().includes(bairroF.toLowerCase()) || (c.cli.city||"").toLowerCase().includes(bairroF.toLowerCase()))
+      .sort((a,b) => b.score.total - a.score.total);
+  }, [engine, seller, escopo, bairroF]);
+
+  return (
+    <div className="space-y-4">
+      <div className="glass rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-lg font-bold">Recuperação 90+ ({lista.length} clientes)</div>
+          <div className="text-xs text-slate-400">Sem compra há mais de 90 dias (proxy via última venda) ou sem histórico.</div>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={()=>setEscopo("vendedor")} className={`px-3 py-1.5 rounded-lg ${escopo==="vendedor"?"grad-blue text-white":"glass-strong"}`}>Vendedor atual</button>
+          <button onClick={()=>setEscopo("todos")} className={`px-3 py-1.5 rounded-lg ${escopo==="todos"?"grad-blue text-white":"glass-strong"}`}>Toda a base</button>
+          <input value={bairroF} onChange={(e)=>setBairroF(e.target.value)} placeholder="Filtrar por bairro/cidade…"
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-400 w-48" />
+        </div>
+      </div>
+
+      <div className="glass rounded-2xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-white/5 text-xs text-slate-400 uppercase">
+            <tr>
+              <th className="text-left p-3">Código</th>
+              <th className="text-left p-3">Cliente</th>
+              <th className="text-left p-3">Ramo</th>
+              <th className="text-left p-3">Local</th>
+              <th className="text-right p-3">Última venda</th>
+              <th className="text-right p-3">Dias</th>
+              <th className="text-right p-3">Valor histórico</th>
+              <th className="text-right p-3">Score</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {lista.slice(0,200).map(c => (
+              <tr key={c.cnpj} className="hover:bg-white/5">
+                <td className="p-3 font-mono text-xs text-blue-300">#{c.cli.external_code||"—"}</td>
+                <td className="p-3">
+                  <div className="font-medium truncate max-w-xs">{c.cli.name}</div>
+                  <div className="text-xs text-slate-500">{c.cli.cnpj_fmt}</div>
+                </td>
+                <td className="p-3 text-xs text-slate-300 truncate max-w-[150px]">{c.cli.ramo||c.cli.tag||"—"}</td>
+                <td className="p-3 text-xs">{c.cli.neighborhood||"—"} · {c.cli.city||"—"}</td>
+                <td className="p-3 text-right text-xs">{fmtDate(c.ultVenda)}</td>
+                <td className="p-3 text-right"><b className={c.diasSemVenda===null?"text-slate-400":c.diasSemVenda>90?"text-rose-400":"text-amber-300"}>{c.diasSemVenda ?? "—"}</b></td>
+                <td className="p-3 text-right text-xs">{fmtMoney(c.totVenda)}</td>
+                <td className="p-3 text-right font-bold">{c.score.total}</td>
+              </tr>
+            ))}
+            {lista.length===0 && <tr><td colSpan="8" className="p-6 text-center text-sm text-slate-400">Nenhum cliente crítico no escopo.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[11px] text-slate-500">
+        💡 Use o filtro de bairro/cidade para montar uma rota de recuperação por região. Esta tela é o que o Thomaz pediu: "uma rota literalmente pra reativar". Sem envolver faturamento — só recuperação.
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   INFORMATIVO — visual, com busca por nome de produto
+   ============================================================ */
+function Informativo({ engine, promos, jornal, setJornal }) {
+  const fileRef = useRef(null);
+  const [busca, setBusca] = useState("");
+  const [loadingPdf, setLoadingPdf] = useState(false);
+
+  const lista = useMemo(() => {
+    const out = [];
+    // Estratégia: mostrar todo produto do estoque, com indicação de promo se estiver no PDF
+    engine.estByEan.forEach((est, ean) => {
+      const prod = engine.prodByEan.get(ean);
+      const promo = promos.find(p => p.ean === ean);
+      out.push({ ean, sku: prod?.sku, prod, est, promo });
+    });
+    if (busca) {
+      const b = busca.toLowerCase();
+      return out.filter(p =>
+        (p.prod?.name||"").toLowerCase().includes(b) ||
+        (p.prod?.brand||"").toLowerCase().includes(b) ||
+        (p.prod?.manufacturer||"").toLowerCase().includes(b) ||
+        (p.prod?.category||"").toLowerCase().includes(b) ||
+        (p.sku||"").includes(b) || (p.ean||"").includes(b)
+      );
+    }
+    // Sem busca: prioriza os que têm promo
+    return out.sort((a,b) => {
+      if (!!a.promo !== !!b.promo) return a.promo ? -1 : 1;
+      return (b.est.qtd||0) - (a.est.qtd||0);
+    });
+  }, [engine, promos, busca]);
+
+  const handleUpload = async (file) => {
+    if (!file) return;
+    setLoadingPdf(true);
+    try {
+      const ext = await pdfExtractTextAndImages(file);
+      setJornal({ fileName: file.name, ...ext });
+    } catch (e) { alert("Erro ao ler PDF: " + e.message); }
+    setLoadingPdf(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="glass rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-lg font-bold flex items-center gap-2">📰 Informativo — produtos organizados</div>
+          <div className="text-xs text-slate-400">
+            {jornal ? <>PDF carregado: <b>{jornal.fileName}</b> ({jornal.numPages} págs · {promos.length} promos detectadas)</> : "Carregue o jornalzinho para destacar promos. Sem PDF, mostra todo o estoque."}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={(e)=>handleUpload(e.target.files?.[0])} className="hidden" />
+          <button onClick={()=>fileRef.current?.click()} className="big-btn grad-blue text-white text-xs">{loadingPdf ? "Lendo PDF…" : (jornal ? "Trocar PDF" : "Carregar PDF")}</button>
+          <input value={busca} onChange={(e)=>setBusca(e.target.value)} placeholder="Buscar: ervilha, tic-tac, EAN, SKU…"
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 w-72" />
+        </div>
+      </div>
+
+      <div className="grid sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+        {lista.slice(0,60).map(p => (
+          <div key={p.ean} className="glass rounded-2xl p-3 flex gap-3">
+            <ProductImage ean={p.ean} sku={p.sku} prod={p.prod} size="lg" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold truncate">{p.prod?.name || `SKU ${p.sku||p.ean}`}</div>
+              <div className="text-[10px] text-slate-400">{p.prod?.brand} {p.prod?.manufacturer && `· ${p.prod.manufacturer}`}</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">EAN {p.ean}{p.sku?` · SKU ${p.sku}`:""}</div>
+              <div className="mt-2 space-y-0.5 text-xs">
+                {p.est.list_price>0 && <div>Preço lista: <b>{fmtMoney(p.est.list_price)}</b></div>}
+                {p.est.margin>0 && <div className="text-slate-400">Margem: {fmtMoney(p.est.margin)}</div>}
+                <div className="text-slate-400">Estoque: <b className="text-white">{fmtInt(p.est.qtd)} {p.est.unit||"un"}</b></div>
+              </div>
+              {p.promo && (
+                <div className="mt-2 rounded p-1.5 grad-promo text-white text-[10px]">
+                  📰 No jornalzinho{p.promo.descontoPct ? ` · ${Math.abs(p.promo.descontoPct)}% off` : ""}
+                  {p.promo.precoPromoNum>0 && <div>Preço promo no PDF: <b>{fmtMoney(p.promo.precoPromoNum)}</b></div>}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {lista.length===0 && <div className="col-span-full text-sm text-slate-400 text-center py-12">Nenhum produto encontrado. Tente outra busca.</div>}
+      </div>
+      <div className="text-[11px] text-slate-500">
+        🖼️ Imagens via <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener" className="text-blue-300">OpenFoodFacts</a> por EAN (gratuito). Quando não há foto cadastrada, mostramos link para Google Imagens. Cache local persiste entre sessões.
+        Descontos vêm do PDF, preço de lista da planilha de Estoque.
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   CAMPANHAS — últimos slides do PDF, validação dupla
+   ============================================================ */
+function Campanhas({ campanhas, jornal }) {
+  if (!jornal) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Carregue o jornalzinho na aba Informativo para detectar campanhas vigentes.</div>;
+  if (!campanhas.length) return (
+    <div className="glass rounded-2xl p-6 text-sm">
+      <div className="font-bold mb-2">Nenhuma campanha foi detectada automaticamente</div>
+      <div className="text-slate-400">
+        A detecção busca os últimos 12 slides do PDF e procura palavras como <i>campanha, ganhe, positivação, meta, bônus, prêmio</i>.
+        Se o jornalzinho usa termos diferentes ou as campanhas estão em formato apenas de imagem (sem texto), não conseguimos extrair automaticamente.
+        Próximo passo: aba de cadastro manual de campanha (próxima versão).
+      </div>
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      <div className="glass rounded-2xl p-4">
+        <div className="text-lg font-bold">🏆 Campanhas vigentes ({campanhas.length})</div>
+        <div className="text-xs text-slate-400">Detecção automática a partir do PDF. <b>Faça a validação dupla</b>: confirme se o que a IA leu corresponde à campanha real antes de comunicar ao vendedor.</div>
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        {campanhas.map((c, i) => (
+          <div key={i} className="glass rounded-2xl overflow-hidden">
+            <img src={c.pageImage} alt={`Página ${c.page}`} className="w-full max-h-80 object-contain bg-slate-900" />
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-bold text-sm">Campanha {i+1} — pág {c.page}</span>
+                <span className="badge bg-amber-700 text-amber-100">Necessita validação</span>
+              </div>
+              <div className="text-xs text-slate-300 leading-relaxed mb-2">{c.texto}…</div>
+              {c.valoresMencionados.length>0 && (
+                <div className="text-xs"><b className="text-emerald-300">Valores no slide:</b> {c.valoresMencionados.join(", ")}</div>
+              )}
+              {c.percentuaisMencionados.length>0 && (
+                <div className="text-xs mt-1"><b className="text-amber-300">Percentuais:</b> {c.percentuaisMencionados.join(", ")}</div>
+              )}
+              <div className="text-[10px] text-slate-500 mt-2">
+                ⚠️ A IA pode ter confundido números — confirme cada valor antes de comunicar ao vendedor.
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="text-[11px] text-slate-500">
+        💡 Próxima evolução (a definir): aba de desempenho do vendedor por campanha, com cálculo de bônus por positivação a partir do CSV de Meta (a ser enviado pela EBD).
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   RESUMO DO VENDEDOR — meta vs realizado + PI pessoal
+   Hoje sem CSV de Meta — mostra estrutura pronta para receber.
+   ============================================================ */
+function ResumoVendedor({ engine, seller }) {
+  const dados = useMemo(() => {
+    if (!seller) return null;
+    const code = seller.internal_code;
+    const vendas = engine.vendasByVendedorCode.get(code) || [];
+    const totVenda = vendas.reduce((a,v)=>a+v.valor, 0);
+    const totVolume = vendas.reduce((a,v)=>a+v.volume, 0);
+    const totPedidos = vendas.length;
+    const clientesUnicos = new Set(vendas.map(v=>v.cnpj)).size;
+    // Top ramos vendidos
+    const ramos = new Map();
+    vendas.forEach(v => {
+      const cli = engine.cliByCnpj.get(v.cnpj);
+      const r = cli?.ramo || cli?.tag || "Sem ramo";
+      if (!ramos.has(r)) ramos.set(r, { ramo: r, valor:0, n:0 });
+      const x = ramos.get(r); x.valor += v.valor; x.n++;
+    });
+    const topRamos = Array.from(ramos.values()).sort((a,b)=>b.valor-a.valor).slice(0,5);
+    // Top produtos
+    const prods = new Map();
+    vendas.forEach(v => {
+      if (!v.ean) return;
+      if (!prods.has(v.ean)) prods.set(v.ean, { ean:v.ean, sku:v.sku, valor:0, qtd:0, n:0 });
+      const x = prods.get(v.ean); x.valor += v.valor; x.qtd += v.volume; x.n++;
+    });
+    const topProds = Array.from(prods.values()).sort((a,b)=>b.valor-a.valor).slice(0,8);
+    // Positivação: clientes da carteira que NÃO compraram no período
+    const carteira = seller.cpf ? Array.from(engine.carteiraByCpf.get(seller.cpf) || []) : [];
+    const positivados = new Set(vendas.map(v=>v.cnpj));
+    const naoPositivados = carteira.filter(c => !positivados.has(c));
+    const taxaPos = carteira.length>0 ? (positivados.size / carteira.length) : 0;
+    return { vendas, totVenda, totVolume, totPedidos, clientesUnicos, topRamos, topProds, naoPositivados, taxaPos, carteiraTam: carteira.length, positivados: positivados.size };
+  }, [engine, seller]);
+
+  // Early return DEPOIS dos hooks
+  if (!seller || !dados) return <div className="glass rounded-2xl p-6">Selecione um vendedor.</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="glass rounded-2xl p-4">
+        <div className="text-xs text-slate-400">Resumo do vendedor</div>
+        <div className="text-xl font-bold">{seller.name}</div>
+        <div className="text-xs text-slate-400">Cod {seller.internal_code} · Janela: últimos {engine.periodoVendasDias} dias até {fmtDate(engine.refDate)}</div>
+      </div>
+
+      <div className="grid md:grid-cols-4 gap-4">
+        <KpiCard label="Faturamento" value={fmtMoney(dados.totVenda)} sub={`${fmtInt(dados.totPedidos)} pedidos`} grad="grad-emerald" icon="💰" />
+        <KpiCard label="Volume vendido" value={fmtInt(dados.totVolume)} sub="unidades" grad="grad-blue" icon="📦" />
+        <KpiCard label="Clientes positivados" value={`${dados.positivados}/${dados.carteiraTam}`} sub={`${(dados.taxaPos*100).toFixed(0)}% da carteira`} grad="grad-violet" icon="✅" />
+        <KpiCard label="Não positivados" value={fmtInt(dados.naoPositivados.length)} sub="oportunidade ativa" grad="grad-rose" icon="🎯" />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="glass rounded-2xl">
+          <div className="px-4 py-3 border-b border-white/10 font-bold text-sm">🏪 Top ramos que o vendedor atende</div>
+          <div className="divide-y divide-white/5">
+            {dados.topRamos.map((r,i) => (
+              <div key={i} className="px-4 py-2 flex items-center justify-between text-sm">
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{r.ramo}</div>
+                  <div className="text-[11px] text-slate-400">{r.n} pedidos</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold">{fmtMoney(r.valor)}</div>
+                  <div className="text-[11px] text-slate-400">{((r.valor/dados.totVenda)*100).toFixed(0)}%</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="glass rounded-2xl">
+          <div className="px-4 py-3 border-b border-white/10 font-bold text-sm">📦 Top produtos do vendedor</div>
+          <div className="divide-y divide-white/5 max-h-96 overflow-y-auto scroll-thin">
+            {dados.topProds.map(p => {
+              const prod = engine.prodByEan.get(p.ean);
+              return (
+                <div key={p.ean} className="px-4 py-2 flex items-center gap-2 text-sm">
+                  <ProductImage ean={p.ean} sku={p.sku} prod={prod} />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium truncate">{prod?.name || `SKU ${p.sku||p.ean}`}</div>
+                    <div className="text-[11px] text-slate-400">{p.n} pedidos · {fmtInt(p.qtd)} un</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-xs">{fmtMoney(p.valor)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="glass rounded-2xl p-4">
+        <div className="font-bold text-sm mb-2">📋 Meta vs realizado (aguardando CSV de Meta)</div>
+        <div className="text-xs text-slate-400">
+          Quando o CSV de Meta (por fornecedor / indústria) for enviado pela EBD, esta seção mostrará:
+        </div>
+        <ul className="text-xs text-slate-300 list-disc list-inside mt-2 space-y-1">
+          <li>Como está vs meta de faturamento</li>
+          <li>Como está vs meta de positivação</li>
+          <li>Projeção para o final do mês (extrapolação da curva atual)</li>
+          <li>Gap por fornecedor — o que falta para bater cada meta</li>
+          <li>Sugestão automática: "vender X de produto Y do fornecedor Z fecha 80% do gap"</li>
+        </ul>
+      </div>
+
+      <div className="glass rounded-2xl p-4">
+        <div className="font-bold text-sm mb-2">🎯 Oportunidades de positivação ({dados.naoPositivados.length} clientes)</div>
+        <div className="text-xs text-slate-400 mb-3">Clientes da carteira que ainda não compraram no período de análise.</div>
+        <div className="text-xs grid sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto scroll-thin">
+          {dados.naoPositivados.slice(0,30).map(cnpj => {
+            const cli = engine.cliByCnpj.get(cnpj);
+            return (
+              <div key={cnpj} className="glass-strong rounded p-2">
+                <div className="font-mono text-blue-300 text-[10px]">#{cli?.external_code||"—"}</div>
+                <div className="font-medium truncate">{cli?.name || cnpj}</div>
+                <div className="text-[10px] text-slate-400 truncate">{cli?.ramo||cli?.tag||"—"} · {cli?.neighborhood||"—"}</div>
+              </div>
+            );
+          })}
+          {dados.naoPositivados.length>30 && <div className="text-slate-500 col-span-full text-center">+{dados.naoPositivados.length-30} clientes…</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SUPERVISOR
+   ============================================================ */
+function Supervisor({ engine, setSellerCode }) {
+  const ranking = useMemo(() => {
+    return engine.sellers.filter(s => s.internal_code).map(s => {
+      const lista = engine.clientesDoVendedor(s);
+      const carteiraSize = s.cpf && engine.carteiraByCpf.get(s.cpf) ? engine.carteiraByCpf.get(s.cpf).size : 0;
+      const rotSize = engine.rotByCode.get(s.internal_code)?.length || 0;
+      const c = lista.reduce((a,x) => { a[x.status]=(a[x.status]||0)+1; return a; }, {});
+      const tot = lista.reduce((a,x)=>a+x.totVenda,0);
+      const semRecente = lista.filter(x => x.status==="CRITICO" || x.status==="SEM_HIST").length;
+      return { seller: s, carteiraSize, rotSize, critico:c.CRITICO||0, atencao:c.ATENCAO||0, emDia:c.EM_DIA||0, semHist:c.SEM_HIST||0,
+        totVenda: tot, risco: carteiraSize>0 ? semRecente/carteiraSize : 0 };
+    }).sort((a,b) => b.risco - a.risco);
+  }, [engine]);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid md:grid-cols-4 gap-4">
+        <KpiCard label="Vendedores" value={fmtInt(ranking.length)} grad="grad-blue" />
+        <KpiCard label="Carteira total" value={fmtInt(ranking.reduce((a,r)=>a+r.carteiraSize,0))} grad="grad-emerald" />
+        <KpiCard label="Roteirizados período" value={fmtInt(ranking.reduce((a,r)=>a+r.rotSize,0))} grad="grad-violet" />
+        <KpiCard label="Críticos 90+ totais" value={fmtInt(ranking.reduce((a,r)=>a+r.critico+r.semHist,0))} grad="grad-rose" />
+      </div>
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-white/10 font-bold text-sm">Ranking por risco de carteira</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-white/5 text-xs text-slate-400 uppercase">
+              <tr>
+                <th className="text-left p-3">Vendedor</th>
+                <th className="text-right p-3">Carteira</th>
+                <th className="text-right p-3">Roteiro</th>
+                <th className="text-right p-3">Em dia</th>
+                <th className="text-right p-3">Atenção</th>
+                <th className="text-right p-3">Crítico 90+</th>
+                <th className="text-right p-3">Sem hist.</th>
+                <th className="text-right p-3">Vendas</th>
+                <th className="text-right p-3">Risco</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {ranking.map(r => (
+                <tr key={r.seller.internal_code} className="hover:bg-white/5">
+                  <td className="p-3">
+                    <div className="font-medium">{r.seller.name}</div>
+                    <div className="text-xs text-slate-400">Cod {r.seller.internal_code} {!r.seller.ativo && <span className="badge bg-rose-700 text-white ml-1">inativo</span>}</div>
+                  </td>
+                  <td className="p-3 text-right">{fmtInt(r.carteiraSize)}</td>
+                  <td className="p-3 text-right">{fmtInt(r.rotSize)}</td>
+                  <td className="p-3 text-right text-emerald-300">{fmtInt(r.emDia)}</td>
+                  <td className="p-3 text-right text-amber-300">{fmtInt(r.atencao)}</td>
+                  <td className="p-3 text-right text-rose-300 font-bold">{fmtInt(r.critico)}</td>
+                  <td className="p-3 text-right text-slate-300">{fmtInt(r.semHist)}</td>
+                  <td className="p-3 text-right text-xs">{fmtMoney(r.totVenda)}</td>
+                  <td className="p-3 text-right">
+                    <div className="inline-block w-20 bg-white/10 rounded-full h-2 overflow-hidden">
+                      <div className="h-full bg-rose-500" style={{width:`${Math.min(100, Math.round(r.risco*100))}%`}}></div>
+                    </div>
+                  </td>
+                  <td className="p-3 text-right">
+                    <button onClick={()=>setSellerCode(r.seller.internal_code)} className="text-xs text-blue-300 hover:underline">Briefing →</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="glass rounded-2xl p-4">
+        <div className="font-bold text-sm mb-2">Alertas gerenciais</div>
+        <ul className="text-xs space-y-1 text-slate-300">
+          {ranking.filter(r=>r.carteiraSize===0 && r.rotSize>0).map(r => <li key={`a1-${r.seller.internal_code}`}>⚠️ <b>{r.seller.name}</b>: roteiro mas sem carteira vinculada (CPF não bate).</li>)}
+          {ranking.filter(r=>r.critico>10).slice(0,5).map(r => <li key={`a2-${r.seller.internal_code}`}>🚨 <b>{r.seller.name}</b>: {r.critico} clientes 90+ — recuperação urgente.</li>)}
+          {ranking.filter(r=>r.carteiraSize>0 && r.rotSize===0).map(r => <li key={`a3-${r.seller.internal_code}`}>📭 <b>{r.seller.name}</b>: carteira de {r.carteiraSize} mas sem roteiro.</li>)}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   QUALIDADE DOS DADOS — agora com DOH e Produtos
+   ============================================================ */
+function Qualidade({ engine }) {
+  const q = useMemo(() => {
+    const tCart = engine.carteiraByCpf.size;
+    const orfaos = tCart - Array.from(engine.carteiraByCpf.keys()).filter(c => engine.vendByCpf.has(c)).length;
+    const cnpjsCount = new Map();
+    (engine.raw.clientes||[]).forEach(c => { const k = normCNPJ(c.identify); if (k) cnpjsCount.set(k, (cnpjsCount.get(k)||0)+1); });
+    const cliDup = Array.from(cnpjsCount.values()).filter(v=>v>1).length;
+    const codesV = new Set();
+    (engine.raw.vendas||[]).forEach(v => v.seller_internal_code && codesV.add(String(v.seller_internal_code).trim()));
+    const codesSemCad = [...codesV].filter(c => !engine.vendByCode.has(c));
+    const eansVend = new Set();
+    engine.vendasByCnpjEan.forEach(v => eansVend.add(v.ean));
+    const eansSemEst = [...eansVend].filter(e => !engine.estByEan.has(e));
+    const eansSemProd = [...eansVend].filter(e => !engine.prodByEan.has(e));
+    let semEnd=0, semCep=0, semBairro=0;
+    engine.cliByCnpj.forEach(c => { if (!c.address) semEnd++; if (!c.cep) semCep++; if (!c.neighborhood) semBairro++; });
+    let cartSemCli=0, vendaSemCli=0, rotSemCli=0;
+    engine.carteiraByCpf.forEach(s => s.forEach(c => { if (!engine.cliByCnpj.has(c)) cartSemCli++; }));
+    engine.vendasByCnpj.forEach((a,c) => { if (!engine.cliByCnpj.has(c)) vendaSemCli += a.length; });
+    engine.rotByCode.forEach(a => a.forEach(r => { if (!engine.cliByCnpj.has(r.cnpj)) rotSemCli++; }));
+
+    const problemas = [
+      { titulo:"Vendedores na Carteira sem cadastro", valor:orfaos, impacto:"Aparecem como '(sem cadastro)'.", bloqueia:false },
+      { titulo:"Clientes duplicados por CNPJ", valor:cliDup, impacto:"Mantemos o último registro.", bloqueia:false },
+      { titulo:"Códigos de vendedor em Vendas sem cadastro", valor:codesSemCad.length, impacto:"Vendas sem nome de vendedor.", bloqueia:false, lista: codesSemCad.slice(0,10).join(", ") },
+      { titulo:"EANs vendidos sem cadastro em Estoque", valor:eansSemEst.length, impacto:"Sem DOH, sem recomendação com estoque.", bloqueia:true },
+      { titulo:"EANs vendidos sem cadastro em Produtos", valor:eansSemProd.length, impacto:"Sem nome/imagem/categoria — usamos só SKU/EAN como rótulo.", bloqueia: engine.prodByEan.size===0 },
+      { titulo:"Clientes sem endereço",   valor:semEnd, impacto:"Sem geocoding confiável.", bloqueia:false },
+      { titulo:"Clientes sem CEP",        valor:semCep, impacto:"Reduz precisão de geocoding.", bloqueia:false },
+      { titulo:"Clientes sem bairro",     valor:semBairro, impacto:"Reduz qualidade de agrupamento.", bloqueia:false },
+      { titulo:"PDVs em Carteira não encontrados em Clientes", valor:cartSemCli, impacto:"Cliente aparece sem nome.", bloqueia:false },
+      { titulo:"Vendas para CNPJs não cadastrados",            valor:vendaSemCli, impacto:"Cliente novo ou cadastro pendente.", bloqueia:false },
+      { titulo:"Roteiros com cliente não encontrado",          valor:rotSemCli, impacto:"Reduz precisão da rota.", bloqueia:false },
+      { titulo:"Histórico real de visitas executadas", valor:0, impacto:"🚩 Não disponível. Proxy via venda. Toda regra 90+ é proxy.", bloqueia:true },
+    ];
+    const blockers = problemas.filter(p => p.bloqueia).length;
+    const confianca = blockers===0 ? "Alta" : blockers<=2 ? "Média" : "Baixa";
+    return { problemas, confianca };
+  }, [engine]);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid md:grid-cols-4 gap-4">
+        <KpiCard label="Confiança geral" value={q.confianca} grad={q.confianca==="Alta"?"grad-emerald":q.confianca==="Média"?"grad-amber":"grad-rose"} />
+        <KpiCard label="Vendedores cadastrados" value={fmtInt(engine.vendedores.length)} grad="grad-blue" />
+        <KpiCard label="Clientes únicos" value={fmtInt(engine.cliByCnpj.size)} grad="grad-violet" />
+        <KpiCard label="Produtos cadastrados" value={fmtInt(engine.prodByEan.size)} sub={engine.prodByEan.size===0?"sem Produtos.csv":"com cadastro"} grad="grad-emerald" />
+      </div>
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-white/10 font-bold text-sm">Problemas identificados</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-white/5 text-xs text-slate-400 uppercase">
+              <tr>
+                <th className="text-left p-3">Problema</th>
+                <th className="text-right p-3">Ocorrências</th>
+                <th className="text-left p-3">Impacto</th>
+                <th className="text-center p-3">Severidade</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {q.problemas.map((p,i) => (
+                <tr key={i} className="hover:bg-white/5">
+                  <td className="p-3">
+                    <div className="font-medium">{p.titulo}</div>
+                    {p.lista && <div className="text-xs text-slate-400 mt-0.5">ex: {p.lista}</div>}
+                  </td>
+                  <td className="p-3 text-right font-bold">{fmtInt(p.valor)}</td>
+                  <td className="p-3 text-xs text-slate-300">{p.impacto}</td>
+                  <td className="p-3 text-center">
+                    {p.bloqueia ? <span className="badge bg-rose-800 text-rose-100">bloqueia</span> : <span className="badge bg-amber-800 text-amber-100">reduz confiança</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="glass rounded-2xl p-4">
+        <div className="font-bold text-sm mb-2">Mapa de relacionamento</div>
+        <pre className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{`Vendedores.internal_code ──┬── Vendas.seller_internal_code
+                           ├── Roteiros.user_internal_code
+                           └── (CPF) ─── Carteira.sellers_identify
+
+Clientes.identify (CNPJ norm) ──┬── Carteira.point_of_sale_identify
+                                ├── Vendas.point_of_sale_cnpj
+                                └── Roteiros.customer_identify
+
+Produtos.ean / .sku ──┬── Vendas.sale_ean / sale_sku
+                      └── Estoque.ean_sku
+
+PDF Jornalzinho ─── regex EAN/SKU ─── Estoque + Vendas + Produtos
+                                       │
+                                       └── OpenFoodFacts.imagem por EAN`}</pre>
+      </div>
+    </div>
+  );
+}
+
+/* Error Boundary para evitar tela branca em caso de erro inesperado */
+class ErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { error: null, info: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("UI crash:", error, info); this.setState({ error, info }); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen p-6">
+          <div className="max-w-3xl mx-auto glass rounded-2xl p-6">
+            <div className="text-2xl font-bold text-rose-300 mb-2">⚠️ Erro ao renderizar o painel</div>
+            <div className="text-sm text-slate-300 mb-3">Algo travou na renderização. A mensagem técnica abaixo ajuda a investigar:</div>
+            <pre className="text-xs bg-black/30 p-3 rounded overflow-x-auto whitespace-pre-wrap scroll-thin max-h-64">
+              {String(this.state.error?.stack || this.state.error?.message || this.state.error)}
+            </pre>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => location.reload()} className="px-4 py-2 rounded-lg grad-blue text-white text-sm font-semibold">↺ Recarregar página</button>
+              <button onClick={() => { try { localStorage.removeItem('ebd_geo_v3'); localStorage.removeItem('ebd_imgs_v3'); } catch{} location.reload(); }}
+                className="px-4 py-2 rounded-lg glass-strong text-sm">Limpar cache local e recarregar</button>
+            </div>
+            <div className="mt-3 text-[11px] text-slate-500">Possíveis causas: CSV com formato inesperado, PDF grande demais, falha de rede com OpenStreetMap/OSRM. Abra o Console do navegador (F12) para mais detalhes.</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+window.addEventListener("error", (e) => console.error("window.error:", e.message, e.error));
+window.addEventListener("unhandledrejection", (e) => console.error("unhandledrejection:", e.reason));
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
+</script>
+</body>
+</html>

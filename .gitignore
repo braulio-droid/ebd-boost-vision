@@ -1,0 +1,29 @@
+# SO
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Node (caso alguém rode npx serve)
+node_modules/
+package-lock.json
+.next/
+.vercel/
+
+# Logs
+*.log
+
+# Backups locais
+*.bak
+*.orig
+
+# Planilhas e PDFs reais — nunca commitar dados de cliente
+*.csv
+*.xlsx
+*.xls
+*.pdf
+data/
+uploads/
