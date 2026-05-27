@@ -867,27 +867,245 @@ function ProductImage({ ean, sku, prod, size="sm" }) {
 }
 
 /* ============================================================
+   HOOK COMPARTILHADO: gerencia rota, geocoding, visitas
+   Usado por TelaHoje e TelaRota para terem o mesmo estado.
+   ============================================================ */
+function useRota({ engine, seller, routeState, setRouteState, promos = [], campanhas = [] }) {
+  const { incluidos, ordemManual, ordemOtim, otimizado, geo, route, visitas } = routeState;
+  const update = (patch) => setRouteState(prev => ({ ...prev, ...patch }));
+
+  const lista = useMemo(() => {
+    if (!seller) return [];
+    return engine.clientesDoVendedor(seller)
+      .map(c => ({ ...c, score: engine.scoreCliente(c) }))
+      .sort((a,b) => {
+        if (a.noRoteiro !== b.noRoteiro) return a.noRoteiro ? -1 : 1;
+        return b.score.total - a.score.total;
+      });
+  }, [engine, seller]);
+
+  // Inicializar incluidos quando troca seller
+  useEffect(() => {
+    if (!seller) return;
+    const s = new Set();
+    lista.forEach(c => { if (c.noRoteiro) s.add(c.cnpj); });
+    // Carrega visitas
+    const all = loadVisitasAll();
+    const sk = seller?.internal_code || "default";
+    const dk = todayKey();
+    update({
+      incluidos: s, ordemManual: null, ordemOtim: null, otimizado: false,
+      route: null, visitas: all[sk]?.[dk] || {},
+    });
+  }, [seller]);
+
+  const persistVisitas = (novo) => {
+    const all = loadVisitasAll();
+    const sk = seller?.internal_code || "default";
+    const dk = todayKey();
+    if (!all[sk]) all[sk] = {};
+    all[sk][dk] = novo;
+    saveVisitasAll(all);
+    update({ visitas: novo });
+  };
+
+  const incluidosLista = useMemo(() => {
+    const arr = lista.filter(c => incluidos.has(c.cnpj));
+    const map = new Map(arr.map(c => [c.cnpj, c]));
+    if (ordemOtim) return ordemOtim.map(cnpj => map.get(cnpj)).filter(Boolean);
+    if (ordemManual) {
+      const inOrder = ordemManual.filter(c => incluidos.has(c)).map(c => map.get(c)).filter(Boolean);
+      const notInOrder = arr.filter(c => !ordemManual.includes(c.cnpj));
+      return [...inOrder, ...notInOrder];
+    }
+    return arr;
+  }, [lista, incluidos, ordemOtim, ordemManual]);
+
+  // próximo cliente pendente (não concluído nem em visita)
+  const proxima = useMemo(() => {
+    const emV = incluidosLista.find(c => visitas[c.cnpj]?.status === "em_visita");
+    if (emV) return { c: emV, emVisita: true };
+    const pend = incluidosLista.find(c => visitas[c.cnpj]?.status !== "concluido");
+    return pend ? { c: pend, emVisita: false } : null;
+  }, [incluidosLista, visitas]);
+
+  const concluidos = incluidosLista.filter(c => visitas[c.cnpj]?.status === "concluido");
+  const oportunidades = useMemo(() => {
+    let t = 0;
+    incluidosLista.forEach(c => {
+      try { t += engine.recomendaInteligente(c, promos, campanhas).totalOportunidades; }
+      catch(e) {}
+    });
+    return t;
+  }, [incluidosLista, promos, campanhas, engine]);
+
+  // Handlers
+  const toggleCli = (cnpj) => {
+    const s = new Set(incluidos);
+    s.has(cnpj) ? s.delete(cnpj) : s.add(cnpj);
+    update({ incluidos: s, ordemOtim: null, route: null, otimizado: false });
+  };
+  const moveInRoute = (cnpj, dir) => {
+    const order = incluidosLista.map(c => c.cnpj);
+    const i = order.indexOf(cnpj); if (i<0) return;
+    const j = i + dir;
+    if (j<0 || j>=order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    update({ ordemManual: order, ordemOtim: null, otimizado: false, route: null });
+  };
+  const removeFromRoute = (cnpj) => {
+    const s = new Set(incluidos); s.delete(cnpj);
+    update({ incluidos: s, ordemOtim: null, otimizado: false, route: null });
+  };
+  const handleCheckIn = (cnpj) => {
+    persistVisitas({ ...visitas, [cnpj]: { ...(visitas[cnpj]||{}), status: "em_visita", checkIn: Date.now() } });
+  };
+  const abrirProximoNoMaps = (cnpjAtual, vNovo) => {
+    const ordem = incluidosLista.map(c => c.cnpj);
+    const idx = ordem.indexOf(cnpjAtual);
+    let prox = null;
+    for (let i = idx+1; i<ordem.length; i++) {
+      if ((vNovo||visitas)[ordem[i]]?.status !== "concluido") { prox = incluidosLista[i]; break; }
+    }
+    if (!prox) { alert("🎉 Rota concluída!"); return; }
+    const g = geo[buildAddressQuery(prox.cli)];
+    const url = g?.lat ? mapsDestinationUrl({lat:g.lat, lon:g.lon})
+                       : mapsDestinationUrl([prox.cli.address, prox.cli.neighborhood, prox.cli.city, prox.cli.state].filter(Boolean).join(", "));
+    window.open(url, "_blank");
+  };
+  const handleCheckOut = (cnpj, opts={}) => {
+    const novo = { ...visitas, [cnpj]: { ...(visitas[cnpj]||{}), status:"concluido", checkOut: Date.now() } };
+    persistVisitas(novo);
+    if (opts.abrirProximo !== false) abrirProximoNoMaps(cnpj, novo);
+  };
+  const handleResetVisita = (cnpj) => {
+    const novo = { ...visitas }; delete novo[cnpj];
+    persistVisitas(novo);
+  };
+  const navegarPara = (cnpj) => {
+    const c = incluidosLista.find(x => x.cnpj === cnpj) || lista.find(x => x.cnpj === cnpj);
+    if (!c) return;
+    const g = geo[buildAddressQuery(c.cli)];
+    const url = g?.lat ? mapsDestinationUrl({lat:g.lat, lon:g.lon})
+                       : mapsDestinationUrl([c.cli.address, c.cli.neighborhood, c.cli.city, c.cli.state].filter(Boolean).join(", "));
+    window.open(url, "_blank");
+  };
+  // Geocoding + auto-rota
+  const [geoProgress, setGeoProgress] = useState(null);
+  const [geoFailed, setGeoFailed] = useState([]);
+  const handleGeocode = async () => {
+    const cache = loadGeo();
+    const pre = {...geo};
+    lista.forEach(c => { const k = buildAddressQuery(c.cli); if (cache[k]?.lat) pre[k] = cache[k]; });
+    update({ geo: pre });
+    setGeoProgress({ done:0, total: lista.length });
+    setGeoFailed([]);
+    const { out, failed } = await geocodeBatch(lista.map(c => c.cli),
+      (d,t,f) => setGeoProgress({ done:d, total:t, failed: f?.length||0 }));
+    const merged = { ...pre, ...out };
+    update({ geo: merged, ordemOtim: null, otimizado: false });
+    setGeoFailed(failed);
+    setGeoProgress(null);
+    // auto-rota
+    const ptsIncl = incluidosLista.map(c => merged[buildAddressQuery(c.cli)]).filter(p=>p?.lat);
+    if (ptsIncl.length>=2) { try { const r = await osrmRoute(ptsIncl); update({ route: r }); } catch(e){} }
+  };
+  const handleOtimizar = async () => {
+    const pts = incluidosLista.map(c => geo[buildAddressQuery(c.cli)]).filter(p=>p?.lat);
+    if (pts.length<2) { alert("Geocodifique primeiro."); return; }
+    const cnpjs = incluidosLista.filter(c => geo[buildAddressQuery(c.cli)]?.lat).map(c => c.cnpj);
+    const order = nearestNeighborOrder(pts, 0);
+    update({ ordemOtim: order.map(i=>cnpjs[i]), otimizado: true, ordemManual: null });
+    const coordsOrder = order.map(i => pts[i]);
+    try { const r = await osrmRoute(coordsOrder); update({ route: r }); } catch(e){}
+  };
+  const abrirRotaCompletaTransito = () => {
+    const pts = incluidosLista.filter(c => visitas[c.cnpj]?.status !== "concluido")
+      .map(c => geo[buildAddressQuery(c.cli)]).filter(p=>p?.lat);
+    const url = mapsRotaCompletaUrl(pts);
+    if (!url) { alert("Marque clientes na rota e geocodifique primeiro."); return; }
+    window.open(url, "_blank");
+  };
+  // Drag/drop
+  const [dragOver, setDragOver] = useState(null);
+  const handleDragStart = (e, cnpj, origin) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", JSON.stringify({ cnpj, origin }));
+  };
+  const handleDragOver = (e, c) => { e.preventDefault(); e.dataTransfer.dropEffect="move"; if (c!==undefined) setDragOver(c); };
+  const handleDragLeave = () => setDragOver(null);
+  const handleDropOnRouteItem = (e, targetCnpj) => {
+    e.preventDefault(); setDragOver(null);
+    let p; try { p = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+    const { cnpj } = p;
+    if (!cnpj || cnpj===targetCnpj) return;
+    const s = new Set(incluidos); s.add(cnpj);
+    const base = incluidosLista.map(c => c.cnpj).filter(c => c !== cnpj);
+    const i = base.indexOf(targetCnpj);
+    if (i>=0) base.splice(i, 0, cnpj); else base.push(cnpj);
+    update({ incluidos: s, ordemManual: base, ordemOtim: null, otimizado: false, route: null });
+  };
+  const handleDropOnRouteEnd = (e) => {
+    e.preventDefault(); setDragOver(null);
+    let p; try { p = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+    if (!p.cnpj) return;
+    const s = new Set(incluidos); s.add(p.cnpj);
+    const base = incluidosLista.map(c => c.cnpj).filter(c => c !== p.cnpj);
+    base.push(p.cnpj);
+    update({ incluidos: s, ordemManual: base, ordemOtim: null, otimizado: false, route: null });
+  };
+  const handleDropOnCarteira = (e) => {
+    e.preventDefault(); setDragOver(null);
+    let p; try { p = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+    if (p.origin !== "rota" || !p.cnpj) return;
+    const s = new Set(incluidos); s.delete(p.cnpj);
+    update({ incluidos: s, ordemOtim: null, otimizado: false, route: null });
+  };
+
+  return {
+    lista, incluidosLista, proxima, concluidos, oportunidades,
+    geo, route, visitas, incluidos,
+    ordemManual, ordemOtim, otimizado,
+    geoProgress, geoFailed,
+    toggleCli, moveInRoute, removeFromRoute,
+    handleCheckIn, handleCheckOut, handleResetVisita, navegarPara,
+    handleGeocode, handleOtimizar, abrirRotaCompletaTransito,
+    handleDragStart, handleDragOver, handleDragLeave,
+    handleDropOnRouteItem, handleDropOnRouteEnd, handleDropOnCarteira, dragOver,
+  };
+}
+
+/* ============================================================
    APP
    ============================================================ */
 const TABS = [
-  { id:"geral",       label:"Visão Geral",      icon:"📊" },
-  { id:"briefing",    label:"Briefing do Dia",  icon:"🎯" },
-  { id:"recuperacao", label:"Recuperação 90+",  icon:"🚨" },
-  { id:"informativo", label:"Informativo",      icon:"📰" },
-  { id:"campanhas",   label:"Campanhas",        icon:"🏆" },
-  { id:"resumo",      label:"Resumo Vendedor",  icon:"📈" },
-  { id:"supervisor",  label:"Supervisor",       icon:"👁️" },
-  { id:"qualidade",   label:"Qualidade",        icon:"🔍" },
+  { id:"hoje",       label:"Hoje",        icon:"📍" },
+  { id:"rota",       label:"Rota",        icon:"🗺️" },
+  { id:"produtos",   label:"Produtos",    icon:"📦" },
+  { id:"supervisor", label:"Supervisor",  icon:"👁️" },
+  { id:"dados",      label:"Dados",       icon:"🔍" },
 ];
 
 function App() {
   const [data, setData] = useState(null);
   const [engine, setEngine] = useState(null);
-  const [tab, setTab] = useState("briefing");
+  const [tab, setTab] = useState("hoje");
   const [sellerCode, setSellerCode] = useState("");
   const [jornal, setJornal] = useState(null);
   const [promos, setPromos] = useState([]);
   const [campanhas, setCampanhas] = useState([]);
+  // Estado global compartilhado: planejamento da rota (incluídos, ordens, geo, visitas)
+  // levantado para topo para Hoje e Rota compartilharem o mesmo estado
+  const [routeState, setRouteState] = useState({
+    incluidos: new Set(),
+    ordemManual: null,
+    ordemOtim: null,
+    otimizado: false,
+    geo: {},
+    route: null,
+    visitas: {},
+  });
+  const [drawerCnpj, setDrawerCnpj] = useState(null); // cliente aberto no drawer
 
   useEffect(() => { if (data) setEngine(buildEngine(data)); }, [data]);
   useEffect(() => {
@@ -905,22 +1123,25 @@ function App() {
   if (!engine) return <div className="p-8 text-center">Construindo engine…</div>;
 
   const seller = engine.sellers.find(s => s.internal_code === sellerCode);
+  const shared = { engine, seller, promos, campanhas, jornal, setJornal,
+                   routeState, setRouteState,
+                   drawerCnpj, setDrawerCnpj,
+                   setSellerAndGoHoje: (c) => { setSellerCode(c); setTab("hoje"); } };
 
   return (
     <div className="min-h-screen pb-20">
       <Header engine={engine} sellerCode={sellerCode} setSellerCode={setSellerCode}
         onReset={() => { setData(null); setEngine(null); setJornal(null); setPromos([]); setCampanhas([]); }} />
-      <Nav tab={tab} setTab={setTab} jornalLoaded={!!jornal} promosCount={promos.length} campsCount={campanhas.length} />
+      <Nav tab={tab} setTab={setTab} />
       <main className="max-w-[1600px] mx-auto px-4 pt-5">
-        {tab === "geral"       && <VisaoGeral engine={engine} setTab={setTab} />}
-        {tab === "briefing"    && <Briefing engine={engine} seller={seller} promos={promos} campanhas={campanhas} />}
-        {tab === "recuperacao" && <Recuperacao engine={engine} seller={seller} />}
-        {tab === "informativo" && <Informativo engine={engine} promos={promos} jornal={jornal} setJornal={setJornal} />}
-        {tab === "campanhas"   && <Campanhas campanhas={campanhas} jornal={jornal} />}
-        {tab === "resumo"      && <ResumoVendedor engine={engine} seller={seller} />}
-        {tab === "supervisor"  && <Supervisor engine={engine} setSellerCode={(c)=>{setSellerCode(c); setTab("briefing");}} />}
-        {tab === "qualidade"   && <Qualidade engine={engine} />}
+        {tab === "hoje"       && <TelaHoje {...shared} />}
+        {tab === "rota"       && <TelaRota {...shared} />}
+        {tab === "produtos"   && <Produtos {...shared} />}
+        {tab === "supervisor" && <TelaSupervisor {...shared} />}
+        {tab === "dados"      && <Qualidade engine={engine} />}
       </main>
+      {/* Drawer global de detalhes do cliente */}
+      {drawerCnpj && <DrawerCliente cnpj={drawerCnpj} {...shared} onClose={() => setDrawerCnpj(null)} />}
     </div>
   );
 }
@@ -930,27 +1151,17 @@ function Header({ engine, sellerCode, setSellerCode, onReset }) {
     <header className="sticky top-0 z-50 backdrop-blur bg-[#0b1220]/90 border-b border-white/10">
       <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg grad-blue flex items-center justify-center text-white font-bold">EB</div>
-          <div>
-            <div className="font-bold text-lg leading-none">EBD Boost Vision <span className="text-xs text-blue-300">v3</span></div>
-            <div className="text-[11px] text-slate-400">Maestro do vendedor · Sellers</div>
-          </div>
+          <div className="w-9 h-9 rounded-lg grad-blue flex items-center justify-center text-white font-bold">EB</div>
+          <div className="font-bold text-base leading-none">EBD Boost Vision</div>
         </div>
         {engine && (
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="glass rounded-lg px-3 py-1.5">
-              <span className="text-[11px] text-slate-400 mr-2">Vendedor</span>
-              <select className="bg-transparent text-sm focus:outline-none" value={sellerCode||""}
-                onChange={(e) => setSellerCode(e.target.value)}>
-                {engine.sellers.filter(s => s.internal_code).sort((a,b)=>(a.name||"").localeCompare(b.name||""))
-                  .map(s => <option key={s.internal_code} value={s.internal_code} className="bg-slate-900">{s.name}{s.ativo ? "" : " (inativo)"}</option>)}
-              </select>
-            </div>
-            <div className="glass rounded-lg px-3 py-1.5 text-xs">
-              <span className="text-slate-400 mr-1">Ref:</span><b>{fmtDate(engine.refDate)}</b>
-              <span className="text-slate-400 ml-2 mr-1">Janela vendas:</span><b>{engine.periodoVendasDias}d</b>
-            </div>
-            <button onClick={onReset} className="text-xs glass-strong px-3 py-1.5 rounded-lg hover:bg-white/10">↺ Recarregar</button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-400" value={sellerCode||""}
+              onChange={(e) => setSellerCode(e.target.value)}>
+              {engine.sellers.filter(s => s.internal_code).sort((a,b)=>(a.name||"").localeCompare(b.name||""))
+                .map(s => <option key={s.internal_code} value={s.internal_code} className="bg-slate-900">{s.name}{s.ativo ? "" : " (inativo)"}</option>)}
+            </select>
+            <button onClick={onReset} className="text-xs text-slate-400 hover:text-white px-2 py-1.5" title="Recarregar planilhas">↺</button>
           </div>
         )}
       </div>
@@ -958,22 +1169,16 @@ function Header({ engine, sellerCode, setSellerCode, onReset }) {
   );
 }
 
-function Nav({ tab, setTab, jornalLoaded, promosCount, campsCount }) {
+function Nav({ tab, setTab }) {
   return (
     <nav className="bg-[#0e1626] border-b border-white/10">
       <div className="max-w-[1600px] mx-auto px-2 flex overflow-x-auto scroll-thin">
-        {TABS.map(t => {
-          const badge = (t.id==="informativo" && promosCount>0) ? promosCount
-                      : (t.id==="campanhas" && campsCount>0) ? campsCount
-                      : null;
-          return (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 border-transparent text-slate-300 hover:text-white flex items-center gap-2 ${tab===t.id ? "tab-active" : ""}`}>
-              <span>{t.icon}</span>{t.label}
-              {badge && <span className="badge bg-blue-700 text-white text-[10px] px-1.5">{badge}</span>}
-            </button>
-          );
-        })}
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-5 py-3 text-sm whitespace-nowrap border-b-2 border-transparent text-slate-300 hover:text-white flex items-center gap-2 ${tab===t.id ? "tab-active" : ""}`}>
+            <span>{t.icon}</span>{t.label}
+          </button>
+        ))}
       </div>
     </nav>
   );
@@ -2755,7 +2960,817 @@ PDF Jornalzinho ─── regex EAN/SKU ─── Estoque + Vendas + Produtos
   );
 }
 
-/* Error Boundary para evitar tela branca em caso de erro inesperado */
+/* ============================================================
+   ============================================================
+   ✨ NOVA UX V4 — TelaHoje · TelaRota · DrawerCliente · TelaSupervisor · Produtos
+   Substitui Briefing, Recuperacao, Informativo, Campanhas, ResumoVendedor, Supervisor, VisaoGeral
+   Princípio: mostrar primeiro a próxima ação, esconder detalhes técnicos em drawer.
+   ============================================================
+   ============================================================ */
+
+/* helpers visuais minimalistas */
+const StatusCor = {
+  CRITICO:  { bg:"bg-rose-600",     text:"text-rose-100",     border:"border-rose-500",     label:"Crítico" },
+  ATENCAO:  { bg:"bg-amber-600",    text:"text-amber-100",    border:"border-amber-500",    label:"Atenção" },
+  EM_DIA:   { bg:"bg-emerald-600",  text:"text-emerald-100",  border:"border-emerald-500",  label:"Em dia" },
+  SEM_HIST: { bg:"bg-slate-500",    text:"text-slate-100",    border:"border-slate-400",    label:"Sem visita registrada" },
+};
+
+const motivoCurto = (c) => {
+  if (c.status === "CRITICO") return `Sem compra há ${c.diasSemVenda} dias. Cliente para recuperar.`;
+  if (c.status === "SEM_HIST") return "Sem histórico confiável. Confirmar atividade.";
+  if (c.naCarteira && !c.noRoteiro) return "Está na carteira mas fora do roteiro do período.";
+  if (c.diasSemVenda > 30) return `${c.diasSemVenda} dias desde a última compra. Atenção.`;
+  return "Manter cobertura — oportunidade de recompra.";
+};
+
+/* ============================================================
+   TELA HOJE — modo vendedor, foco em ação
+   Topo / Próxima parada (hero) / 3 KPIs / Lista compacta
+   ============================================================ */
+function TelaHoje(props) {
+  const { engine, seller, promos, campanhas, setDrawerCnpj } = props;
+  const r = useRota(props);
+  if (!seller) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Selecione um vendedor.</div>;
+  if (r.lista.length === 0) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Este vendedor não tem clientes na carteira.</div>;
+
+  const totalRota = r.incluidosLista.length;
+  const concluidos = r.concluidos.length;
+  const criticos = r.incluidosLista.filter(c => c.status === "CRITICO" || c.status === "SEM_HIST").length;
+  const pct = totalRota>0 ? Math.round(concluidos/totalRota*100) : 0;
+  const semGeo = r.incluidosLista.filter(c => !r.geo[buildAddressQuery(c.cli)]?.lat).length;
+
+  return (
+    <div className="space-y-4">
+      {/* 1. Cabeçalho ultra compacto */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-2xl font-bold leading-tight">{seller.name}</div>
+          <div className="text-xs text-slate-400">Rota de hoje · {totalRota} clientes · {concluidos} concluídos</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {r.proxima && (
+            <button onClick={() => r.proxima.emVisita ? r.handleCheckOut(r.proxima.c.cnpj) : (r.handleCheckIn(r.proxima.c.cnpj), r.navegarPara(r.proxima.c.cnpj))}
+              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm">
+              {r.proxima.emVisita ? "✅ Finalizar visita" : concluidos === 0 ? "🚗 Iniciar rota" : "🚗 Continuar rota"}
+            </button>
+          )}
+          <button onClick={r.abrirRotaCompletaTransito}
+            className="px-3 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-sm" title="Abrir Google Maps com a rota completa e trânsito ao vivo">
+            🗺️ Abrir Maps
+          </button>
+        </div>
+      </div>
+
+      {/* Barra de progresso simples */}
+      {totalRota > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1 progress-bar"><div className="progress-fill" style={{width: `${pct}%`}}></div></div>
+          <div className="text-sm font-bold tabular-nums">{pct}%</div>
+        </div>
+      )}
+
+      {/* 2. Próxima parada — hero card */}
+      {r.proxima ? <ProximaParada r={r} setDrawerCnpj={setDrawerCnpj} /> : (
+        <div className="glass rounded-2xl p-6 text-center">
+          <div className="text-3xl mb-2">🎉</div>
+          <div className="font-bold text-lg">Rota concluída</div>
+          <div className="text-sm text-slate-400">Você visitou todos os clientes do dia.</div>
+        </div>
+      )}
+
+      {/* 3. Resumo do dia (3 KPIs) */}
+      <div className="grid grid-cols-3 gap-3">
+        <KpiSimples label="Clientes na rota" value={totalRota} cor="blue" />
+        <KpiSimples label="Para recuperar" value={criticos} cor={criticos>0?"rose":"slate"} />
+        <KpiSimples label="Oportunidades" value={r.oportunidades} cor={r.oportunidades>0?"emerald":"slate"} />
+      </div>
+
+      {/* 4. Lista compacta */}
+      <div className="glass rounded-2xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+          <div className="font-bold text-sm">Sequência da rota</div>
+          {totalRota > 0 && r.proxima && (
+            <button onClick={() => setDrawerCnpj(r.proxima.c.cnpj)} className="text-xs text-blue-300 hover:underline">Ver próximo →</button>
+          )}
+        </div>
+        <div className="divide-y divide-white/5">
+          {r.incluidosLista.length === 0 && (
+            <div className="px-4 py-8 text-sm text-slate-400 text-center">
+              Nenhum cliente marcado para hoje. Vá em <b>Rota</b> para montar a sequência.
+            </div>
+          )}
+          {r.incluidosLista.map((c, idx) => <LinhaRota key={c.cnpj} c={c} idx={idx} r={r} setDrawerCnpj={setDrawerCnpj} />)}
+        </div>
+      </div>
+
+      {/* 5. Alerta discreto de problemas que afetam a rota */}
+      {(semGeo > 0 || r.geoFailed.length > 0) && (
+        <details className="glass-strong rounded-xl text-xs">
+          <summary className="px-4 py-2 cursor-pointer text-slate-300 hover:text-white">
+            ⚠️ Problemas que afetam a rota ({semGeo + r.geoFailed.length})
+          </summary>
+          <div className="px-4 pb-3 space-y-1 text-slate-400">
+            {semGeo > 0 && <div>{semGeo} cliente{semGeo>1?"s":""} ainda não aparece{semGeo>1?"m":""} no mapa. Clique em <b>Rota → Geocodificar</b> para tentar localizar.</div>}
+            {r.geoFailed.length > 0 && <div>{r.geoFailed.length} endereço{r.geoFailed.length>1?"s":""} não encontrado{r.geoFailed.length>1?"s":""} no mapa público — pode ser cadastro incompleto.</div>}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function KpiSimples({ label, value, cor = "blue" }) {
+  const corMap = {
+    blue:"text-blue-300", emerald:"text-emerald-300", rose:"text-rose-300", amber:"text-amber-300", slate:"text-slate-400"
+  };
+  return (
+    <div className="glass rounded-2xl p-4 text-center">
+      <div className="text-[11px] uppercase text-slate-400 tracking-wider">{label}</div>
+      <div className={`text-3xl font-bold mt-1 ${corMap[cor]}`}>{value}</div>
+    </div>
+  );
+}
+
+function LinhaRota({ c, idx, r, setDrawerCnpj }) {
+  const v = r.visitas[c.cnpj];
+  const isConc = v?.status === "concluido";
+  const isEmV = v?.status === "em_visita";
+  const sc = StatusCor[c.status] || StatusCor.SEM_HIST;
+  const corBolinha = isConc ? "bg-slate-500" : isEmV ? "bg-blue-600" : sc.bg;
+  const conteudo = isConc ? "✓" : isEmV ? "📍" : idx+1;
+  return (
+    <div className={`px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-white/5 ${isConc?"opacity-50":""} ${isEmV?"bg-blue-900/20":""}`}
+         onClick={() => setDrawerCnpj(c.cnpj)}>
+      <div className={`w-9 h-9 rounded-full ${corBolinha} text-white font-bold text-sm flex items-center justify-center shrink-0 ${isEmV?"ring-2 ring-blue-300":""}`}>
+        {conteudo}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className={`text-sm font-semibold truncate ${isConc?"line-through text-slate-400":""}`}>{c.cli.name}</div>
+        <div className="text-[11px] text-slate-400 truncate">{c.cli.neighborhood||"—"} · {c.cli.city||"—"} · {sc.label}</div>
+      </div>
+      {!isConc && !isEmV && (
+        <button onClick={(e) => { e.stopPropagation(); r.handleCheckIn(c.cnpj); r.navegarPara(c.cnpj); }}
+          className="shrink-0 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold">
+          Cheguei
+        </button>
+      )}
+      {isEmV && (
+        <button onClick={(e) => { e.stopPropagation(); r.handleCheckOut(c.cnpj); }}
+          className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">
+          Finalizar
+        </button>
+      )}
+      {isConc && (
+        <span className="shrink-0 text-[10px] text-slate-400">
+          {fmtDuracao(v.checkOut - v.checkIn)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ProximaParada({ r, setDrawerCnpj }) {
+  const { c, emVisita } = r.proxima;
+  const sc = StatusCor[c.status] || StatusCor.SEM_HIST;
+  const motivo = motivoCurto(c);
+  const v = r.visitas[c.cnpj];
+  const idxAtual = r.incluidosLista.findIndex(x => x.cnpj === c.cnpj) + 1;
+  return (
+    <div className={`glass rounded-2xl p-5 border-l-4 ${sc.border}`}>
+      <div className="flex items-start justify-between flex-wrap gap-2 mb-2">
+        <div>
+          <div className="text-xs uppercase tracking-wider text-slate-400 font-bold">{emVisita ? "Em visita agora" : "Próxima parada"}</div>
+          <div className="text-xl font-bold mt-0.5">#{idxAtual} · {c.cli.name}</div>
+          <div className="text-sm text-slate-300">{c.cli.neighborhood||"—"} · {c.cli.city||"—"}/{c.cli.state||"—"}</div>
+        </div>
+        <span className={`badge ${sc.bg} ${sc.text} text-xs px-3 py-1`}>{sc.label}</span>
+      </div>
+      <div className="text-sm text-slate-200 mb-4">
+        <span className="text-slate-400">Motivo: </span>{motivo}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {!emVisita && (
+          <button onClick={() => { r.handleCheckIn(c.cnpj); r.navegarPara(c.cnpj); }}
+            className="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm">
+            🚗 Cheguei
+          </button>
+        )}
+        {emVisita && (
+          <button onClick={() => r.handleCheckOut(c.cnpj)}
+            className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">
+            ✅ Finalizar + próximo
+          </button>
+        )}
+        <button onClick={() => r.navegarPara(c.cnpj)}
+          className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/15 text-sm font-semibold">
+          🗺️ Abrir Maps
+        </button>
+        <button onClick={() => setDrawerCnpj(c.cnpj)}
+          className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/15 text-sm font-semibold">
+          📦 Ver produtos
+        </button>
+      </div>
+      {emVisita && v?.checkIn && (
+        <div className="mt-3 text-[11px] text-slate-400">
+          Chegou às {fmtHora(v.checkIn)} · {fmtDuracao(Date.now() - v.checkIn)} aqui
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   DRAWER CLIENTE — detalhe lateral com 4 abas
+   ============================================================ */
+function DrawerCliente({ cnpj, engine, seller, promos, campanhas, onClose, routeState }) {
+  const [aba, setAba] = useState("resumo");
+  const [verTodos, setVerTodos] = useState(false);
+  const c = useMemo(() => {
+    if (!cnpj) return null;
+    if (seller) {
+      const lista = engine.clientesDoVendedor(seller).map(x => ({ ...x, score: engine.scoreCliente(x) }));
+      const f = lista.find(x => x.cnpj === cnpj);
+      if (f) return f;
+    }
+    const cli = engine.cliByCnpj.get(cnpj);
+    if (!cli) return null;
+    const vendasCli = engine.vendasByCnpj.get(cnpj) || [];
+    const ultVenda = vendasCli.reduce((a,v)=>(v.date && (!a||v.date>a))?v.date:a, null);
+    const dias = ultVenda ? daysBetween(ultVenda, engine.refDate) : null;
+    let st = "SEM_HIST";
+    if (ultVenda) st = dias>90?"CRITICO":dias>30?"ATENCAO":"EM_DIA";
+    const obj = { cnpj, cli, vendasCli, ultVenda, totVenda: vendasCli.reduce((a,v)=>a+v.valor,0), numVenda: vendasCli.length, diasSemVenda: dias, status: st, noRoteiro:false, naCarteira:true };
+    obj.score = engine.scoreCliente(obj);
+    return obj;
+  }, [cnpj, engine, seller]);
+  const intel = useMemo(() => c ? engine.recomendaInteligente(c, promos||[], campanhas||[]) : null, [c, engine, promos, campanhas]);
+  const visita = routeState?.visitas?.[cnpj];
+  if (!c) return null;
+  const sc = StatusCor[c.status] || StatusCor.SEM_HIST;
+  const allSugestoes = intel ? [
+    ...intel.reposicao.map(r => ({...r, tipoLabel:"Reposição", tipoCor:"emerald", tipoIcone:"🔄"})),
+    ...intel.novoInformativo.map(r => ({...r, tipoLabel:"Novo no informativo", tipoCor:"amber", tipoIcone:"📰"})),
+    ...intel.recompra.map(r => ({...r, tipoLabel:"Recompra esquecida", tipoCor:"blue", tipoIcone:"🔁"})),
+    ...intel.campanha.map(r => ({...r, tipoLabel:"Campanha", tipoCor:"violet", tipoIcone:"🏆"})),
+  ].sort((a,b)=>b.score-a.score) : [];
+  const top3 = allSugestoes.slice(0,3);
+  const resto = allSugestoes.slice(3);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex">
+      <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+      <div className="w-full max-w-xl bg-[#0e1626] border-l border-white/10 overflow-hidden flex flex-col">
+        <div className="px-5 pt-4 pb-3 border-b border-white/10">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <span className={`badge ${sc.bg} ${sc.text} text-xs px-3 py-1`}>{sc.label}</span>
+            <button onClick={onClose} className="text-slate-400 hover:text-white text-2xl leading-none">×</button>
+          </div>
+          <div className="text-xl font-bold leading-tight">{c.cli.name}</div>
+          <div className="text-xs text-slate-400 mt-1">{c.cli.neighborhood||"—"} · {c.cli.city||"—"}/{c.cli.state||"—"}</div>
+        </div>
+        <div className="flex border-b border-white/10 bg-white/5">
+          <TabBtnDrawer active={aba==="resumo"}    onClick={()=>setAba("resumo")}    label="Resumo" />
+          <TabBtnDrawer active={aba==="produtos"}  onClick={()=>setAba("produtos")}  label="Produtos" badge={allSugestoes.length||null} />
+          <TabBtnDrawer active={aba==="historico"} onClick={()=>setAba("historico")} label="Histórico" badge={c.vendasCli.length||null} />
+          <TabBtnDrawer active={aba==="dados"}     onClick={()=>setAba("dados")}     label="Dados" />
+        </div>
+        <div className="flex-1 overflow-y-auto scroll-thin">
+          {aba === "resumo" && (
+            <div className="p-5 space-y-4">
+              <div>
+                <div className="text-[11px] uppercase text-slate-400 font-bold mb-1">Endereço</div>
+                <div className="text-sm">{c.cli.address||"—"}</div>
+                <a target="_blank" rel="noopener" href={`https://www.google.com/maps/search/${encodeURIComponent([c.cli.address, c.cli.neighborhood, c.cli.city, c.cli.state, c.cli.cep].filter(Boolean).join(", "))}`}
+                  className="inline-block mt-1 text-xs text-blue-300 hover:underline">📍 Abrir no Maps</a>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="glass-strong rounded-xl p-3">
+                  <div className="text-[10px] uppercase text-slate-400">Última compra</div>
+                  <div className="text-base font-bold">{fmtDate(c.ultVenda)}</div>
+                  <div className="text-[11px] text-slate-400">{c.diasSemVenda!==null?`${c.diasSemVenda} dias atrás`:"Sem histórico confiável"}</div>
+                </div>
+                <div className="glass-strong rounded-xl p-3">
+                  <div className="text-[10px] uppercase text-slate-400">Total vendido</div>
+                  <div className="text-base font-bold">{fmtMoney(c.totVenda)}</div>
+                  <div className="text-[11px] text-slate-400">{c.numVenda} pedidos</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase text-slate-400 font-bold mb-1">Motivo da prioridade</div>
+                <ul className="text-sm text-slate-200 space-y-1 list-disc list-inside">
+                  {c.score.motivos.slice(0,3).map((m,i) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+              {visita?.status === "concluido" && (
+                <div className="glass-strong rounded-xl p-3 text-sm">
+                  ✓ Visita concluída {fmtHora(visita.checkIn)} → {fmtHora(visita.checkOut)} ({fmtDuracao(visita.checkOut-visita.checkIn)})
+                </div>
+              )}
+              {visita?.status === "em_visita" && (
+                <div className="glass-strong rounded-xl p-3 text-sm">
+                  <div className="text-blue-300 font-bold">📍 Em visita</div>
+                  <div className="text-slate-300 text-xs">Chegou às {fmtHora(visita.checkIn)} · {fmtDuracao(Date.now()-visita.checkIn)} aqui</div>
+                </div>
+              )}
+            </div>
+          )}
+          {aba === "produtos" && (
+            <div className="p-5 space-y-3">
+              {top3.length === 0 ? (
+                <div className="text-sm text-slate-400 text-center py-8">
+                  Sem oportunidades detectadas. Carregue o jornalzinho na aba <b>Produtos</b> para ativar sugestões.
+                </div>
+              ) : (
+                <>
+                  <div className="text-[11px] text-slate-400">3 principais sugestões agora</div>
+                  {top3.map((r,i) => <CardProdutoSimples key={r.ean+'-'+r.tipo} r={r} idx={i+1} />)}
+                  {allSugestoes.length > 3 && !verTodos && (
+                    <button onClick={() => setVerTodos(true)} className="w-full px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300">
+                      Ver todas as {allSugestoes.length} oportunidades →
+                    </button>
+                  )}
+                  {verTodos && resto.map((r,i) => <CardProdutoSimples key={r.ean+'-'+r.tipo+'-r'} r={r} idx={i+4} />)}
+                </>
+              )}
+            </div>
+          )}
+          {aba === "historico" && (
+            <div className="p-5 space-y-2">
+              {c.vendasCli.length === 0 ? (
+                <div className="text-sm text-slate-400 text-center py-8">Sem histórico de compra registrado.</div>
+              ) : c.vendasCli.slice(0,50).map((v,i) => {
+                const prod = engine.prodByEan?.get(v.ean);
+                return (
+                  <div key={i} className="glass-strong rounded-lg p-2 flex items-center gap-2 text-xs">
+                    <ProductImage ean={v.ean} sku={v.sku} prod={prod} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{prod?.name || `Produto ${v.sku||v.ean}`}</div>
+                      <div className="text-slate-400 text-[10px]">{fmtDate(v.date)}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-bold">{fmtMoney(v.valor)}</div>
+                      <div className="text-slate-400 text-[10px]">{fmtInt(v.volume)} un</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {c.vendasCli.length > 50 && <div className="text-[10px] text-slate-500 text-center pt-2">+{c.vendasCli.length-50} pedidos…</div>}
+            </div>
+          )}
+          {aba === "dados" && (
+            <div className="p-5 space-y-3 text-xs">
+              <div>
+                <div className="text-[10px] uppercase text-slate-400 font-bold">Identificação</div>
+                <div>CNPJ: <span className="font-mono">{c.cli.cnpj_fmt}</span></div>
+                <div>Código externo: <span className="font-mono text-blue-300">#{c.cli.external_code||"—"}</span></div>
+                <div>Ramo: {c.cli.ramo||c.cli.tag||"—"}</div>
+                {c.cli.phone && <div>Telefone: {c.cli.phone}</div>}
+              </div>
+              <div>
+                <div className="text-[10px] uppercase text-slate-400 font-bold">Hierarquia comercial</div>
+                <div>Rota: {c.cli.route_desc||"—"}</div>
+                <div>Praça: {c.cli.square_desc||"—"}</div>
+                <div>Vendedor: {c.cli.seller||"—"}</div>
+                <div>Supervisor: {c.cli.supervisor||"—"}</div>
+                {c.cli.economic_group && c.cli.economic_group !== "SEM GRUPO ECONOMICO" && <div>Grupo econômico: {c.cli.economic_group}</div>}
+              </div>
+              <div>
+                <div className="text-[10px] uppercase text-slate-400 font-bold">Status na rota</div>
+                <div>Score de prioridade: <b>{c.score.total}</b></div>
+                <div>{c.noRoteiro ? "✓ No roteiro planejado" : "Fora do roteiro do período"}</div>
+                <div>{c.naCarteira ? "✓ Na carteira oficial" : "Não consta na carteira"}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabBtnDrawer({ active, onClick, label, badge }) {
+  return (
+    <button onClick={onClick}
+      className={`flex-1 px-3 py-2.5 text-sm font-semibold border-b-2 transition-colors ${active ? "border-blue-400 text-white bg-white/5" : "border-transparent text-slate-400 hover:text-white"}`}>
+      {label}
+      {badge && <span className="ml-1.5 text-[10px] bg-white/10 rounded-full px-1.5">{badge}</span>}
+    </button>
+  );
+}
+
+function CardProdutoSimples({ r, idx }) {
+  const corMap = { emerald:"text-emerald-300", amber:"text-amber-300", blue:"text-blue-300", violet:"text-violet-300" };
+  const conf = r.score >= 100 ? "Alta" : r.score >= 50 ? "Média" : "Baixa";
+  const confCor = conf === "Alta" ? "text-emerald-300" : conf === "Média" ? "text-amber-300" : "text-slate-400";
+  return (
+    <div className="glass-strong rounded-xl p-3 flex gap-3">
+      <ProductImage ean={r.ean} sku={r.sku} prod={r.prod} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-2">
+          <div className="text-sm font-bold truncate">{r.prod?.name || `Produto ${r.sku||r.ean}`}</div>
+          <span className={`text-[10px] shrink-0 ${corMap[r.tipoCor]||""}`}>{r.tipoIcone} {r.tipoLabel}</span>
+        </div>
+        {r.est && r.est.qtd>0 ? (
+          <div className="text-xs text-slate-300 mt-0.5">
+            {fmtMoney(r.est.list_price)}{r.promo?.descontoPct ? <span className="text-amber-300"> · {Math.abs(r.promo.descontoPct)}% off</span> : ""} · estoque {fmtInt(r.est.qtd)}
+          </div>
+        ) : (
+          <div className="text-xs text-amber-300 mt-0.5">Sem estoque cadastrado</div>
+        )}
+        <div className="text-[11px] text-slate-400 mt-1 italic">{r.motivo}</div>
+        <div className="text-[10px] mt-1">Confiança: <b className={confCor}>{conf}</b></div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TELA ROTA — mapa + sequência (planejar e ajustar)
+   ============================================================ */
+function TelaRota(props) {
+  const { engine, seller, setDrawerCnpj } = props;
+  const r = useRota(props);
+  const [viewMode, setViewMode] = useState("split");
+  const mapRef = useRef(null);
+  const mapObjRef = useRef(null);
+  const markersRef = useRef([]);
+  const polyRef = useRef(null);
+
+  const mapRefCallback = useCallback((el) => {
+    mapRef.current = el;
+    if (el && !mapObjRef.current && window.L) {
+      const m = window.L.map(el, { zoomControl: true }).setView([-23.55, -46.63], 11);
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap · OSRM" }).addTo(m);
+      mapObjRef.current = m;
+      setTimeout(() => m.invalidateSize(), 200);
+    }
+  }, []);
+
+  useEffect(() => {
+    const m = mapObjRef.current;
+    if (!m || !window.L) return;
+    markersRef.current.forEach(mk => { try { m.removeLayer(mk); } catch(e) {} });
+    markersRef.current = [];
+    if (polyRef.current) { try { m.removeLayer(polyRef.current); } catch(e) {} polyRef.current = null; }
+    r.lista.filter(c => !r.incluidos.has(c.cnpj)).forEach(c => {
+      const g = r.geo[buildAddressQuery(c.cli)];
+      if (!g?.lat) return;
+      const icon = window.L.divIcon({ className:"", html:`<div style="background:#64748b;color:white;border-radius:50%;width:12px;height:12px;border:2px solid white;"></div>`, iconSize:[12,12], iconAnchor:[6,6] });
+      const mk = window.L.marker([g.lat, g.lon], { icon, opacity: 0.6 }).bindPopup(`<div style="color:#1e293b"><b>${c.cli.name}</b><br/><i>fora da rota</i></div>`);
+      mk.on("click", () => setDrawerCnpj(c.cnpj));
+      mk.addTo(m); markersRef.current.push(mk);
+    });
+    const coords = [];
+    r.incluidosLista.forEach((c, idx) => {
+      const g = r.geo[buildAddressQuery(c.cli)];
+      if (!g?.lat) return;
+      coords.push({ lat: g.lat, lon: g.lon });
+      const vs = r.visitas[c.cnpj]?.status;
+      let cls, conteudo = idx+1, size = 30;
+      if (vs === "concluido") { cls = "concluido"; conteudo = "✓"; }
+      else if (vs === "em_visita") { cls = "atendendo"; conteudo = "📍"; size = 38; }
+      else cls = c.status==="CRITICO" ? "critico" : c.status==="ATENCAO" ? "atencao" : "em-dia";
+      const icon = window.L.divIcon({ className:"", html:`<div class="route-pin ${cls}">${conteudo}</div>`, iconSize:[size,size], iconAnchor:[size/2,size/2] });
+      const mk = window.L.marker([g.lat, g.lon], { icon }).bindPopup(`<div style="color:#1e293b;min-width:180px"><b>${idx+1}. ${c.cli.name}</b><br/>${c.cli.neighborhood||""}<br/>${c.cli.city||""}/${c.cli.state||""}</div>`);
+      mk.on("click", () => setDrawerCnpj(c.cnpj));
+      mk.addTo(m); markersRef.current.push(mk);
+    });
+    if (r.route?.geometry?.coordinates?.length) {
+      const ll = r.route.geometry.coordinates.map(c => [c[1], c[0]]);
+      polyRef.current = window.L.polyline(ll, { color:"#3b82f6", weight:4, opacity:0.85 }).addTo(m);
+      try { m.fitBounds(polyRef.current.getBounds(), { padding:[30,30] }); } catch(e) {}
+    } else if (coords.length > 0) {
+      try {
+        const grp = window.L.featureGroup(markersRef.current);
+        const b = grp.getBounds();
+        if (b.isValid()) m.fitBounds(b, { padding:[30,30] });
+      } catch(e) {}
+      if (coords.length > 1) {
+        polyRef.current = window.L.polyline(coords.map(c=>[c.lat,c.lon]), { color:"#64748b", weight:2, dashArray:"6,8", opacity:0.7 }).addTo(m);
+      }
+    }
+    setTimeout(() => { try { m.invalidateSize(); } catch(e) {} }, 100);
+  }, [r.lista, r.incluidos, r.incluidosLista, r.geo, r.route, r.visitas]);
+
+  if (!seller) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Selecione um vendedor.</div>;
+  const totalKm = r.route ? (r.route.distance_m/1000).toFixed(1) : null;
+  const totalMin = r.route ? Math.round(r.route.duration_s/60) : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="glass rounded-2xl p-3 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-slate-400">{r.incluidosLista.length} clientes na rota</span>
+          {r.route && <span className="px-2 py-0.5 rounded bg-blue-900/40 text-blue-200 text-xs">{totalKm} km · {totalMin} min</span>}
+          {r.otimizado && <span className="badge bg-emerald-700 text-emerald-100 text-[10px]">Otimizada</span>}
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={r.handleGeocode} disabled={!!r.geoProgress} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">
+            {r.geoProgress ? `📍 ${r.geoProgress.done}/${r.geoProgress.total}…` : "📍 Geocodificar"}
+          </button>
+          <button onClick={r.handleOtimizar} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white">⚡ Otimizar</button>
+          <button onClick={r.abrirRotaCompletaTransito} className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white">🗺️ Abrir Maps</button>
+        </div>
+      </div>
+
+      <div className="lg:hidden flex bg-white/5 rounded-lg p-1">
+        <button onClick={()=>setViewMode("lista")} className={`flex-1 px-3 py-1.5 rounded text-sm ${viewMode==="lista"?"bg-white/15":""}`}>📋 Lista</button>
+        <button onClick={()=>setViewMode("mapa")} className={`flex-1 px-3 py-1.5 rounded text-sm ${viewMode==="mapa"?"bg-white/15":""}`}>🗺️ Mapa</button>
+      </div>
+
+      <div className="grid grid-cols-12 gap-4">
+        {(viewMode!=="mapa") && (
+          <div className="col-span-12 lg:col-span-5 space-y-4">
+            <div className="glass rounded-2xl" onDragOver={(e)=>r.handleDragOver(e)} onDrop={r.handleDropOnRouteEnd}>
+              <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                <div className="font-bold text-sm">Sequência</div>
+              </div>
+              <div className="max-h-[40vh] overflow-y-auto scroll-thin divide-y divide-white/5">
+                {r.incluidosLista.length === 0 ? (
+                  <div className="px-4 py-6 text-xs text-slate-400 text-center">Marque clientes da carteira</div>
+                ) : r.incluidosLista.map((c, idx) => (
+                  <ItemSequencia key={c.cnpj} c={c} idx={idx} r={r} setDrawerCnpj={setDrawerCnpj} />
+                ))}
+              </div>
+            </div>
+            <div className="glass rounded-2xl" onDragOver={(e)=>r.handleDragOver(e)} onDrop={r.handleDropOnCarteira}>
+              <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                <div className="font-bold text-sm">Carteira</div>
+                <span className="text-[10px] text-slate-400">{r.lista.length - r.incluidos.size} disponíveis</span>
+              </div>
+              <div className="max-h-[35vh] overflow-y-auto scroll-thin divide-y divide-white/5">
+                {r.lista.map(c => (<ItemCarteira key={c.cnpj} c={c} r={r} setDrawerCnpj={setDrawerCnpj} />))}
+              </div>
+            </div>
+          </div>
+        )}
+        {(viewMode!=="lista") && (
+          <div className="col-span-12 lg:col-span-7">
+            <div className="glass rounded-2xl overflow-hidden">
+              <div ref={mapRefCallback} style={{ height: "75vh", width: "100%" }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ItemSequencia({ c, idx, r, setDrawerCnpj }) {
+  const v = r.visitas[c.cnpj];
+  const isConc = v?.status === "concluido";
+  const isEmV = v?.status === "em_visita";
+  const sc = StatusCor[c.status] || StatusCor.SEM_HIST;
+  return (
+    <div className={`px-3 py-2 flex items-center gap-2 hover:bg-white/5 ${isConc?"opacity-50":""}`}
+         draggable={!isConc}
+         onDragStart={(e) => r.handleDragStart(e, c.cnpj, "rota")}
+         onClick={() => setDrawerCnpj(c.cnpj)}>
+      <div className={`w-7 h-7 rounded-full ${isConc?"bg-slate-500":isEmV?"bg-blue-600":sc.bg} text-white font-bold text-xs flex items-center justify-center shrink-0`}>
+        {isConc?"✓":isEmV?"📍":idx+1}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-semibold truncate">{c.cli.name}</div>
+        <div className="text-[10px] text-slate-400 truncate">{c.cli.neighborhood||"—"}</div>
+      </div>
+      <div className="flex gap-0.5 shrink-0">
+        <button onClick={(e)=>{e.stopPropagation();r.moveInRoute(c.cnpj,-1);}} disabled={idx===0} className="w-5 h-5 rounded bg-white/5 hover:bg-white/15 disabled:opacity-30 text-[10px]">↑</button>
+        <button onClick={(e)=>{e.stopPropagation();r.moveInRoute(c.cnpj,1);}} disabled={idx===r.incluidosLista.length-1} className="w-5 h-5 rounded bg-white/5 hover:bg-white/15 disabled:opacity-30 text-[10px]">↓</button>
+        <button onClick={(e)=>{e.stopPropagation();r.removeFromRoute(c.cnpj);}} className="w-5 h-5 rounded-full bg-rose-800 hover:bg-rose-600 text-white text-[10px]">×</button>
+      </div>
+    </div>
+  );
+}
+
+function ItemCarteira({ c, r, setDrawerCnpj }) {
+  const isInc = r.incluidos.has(c.cnpj);
+  const sc = StatusCor[c.status] || StatusCor.SEM_HIST;
+  return (
+    <div className={`px-3 py-2 flex items-center gap-2 hover:bg-white/5 ${isInc?"opacity-40":"cursor-pointer"}`}
+         draggable={!isInc}
+         onDragStart={(e) => r.handleDragStart(e, c.cnpj, "carteira")}
+         onClick={() => setDrawerCnpj(c.cnpj)}>
+      <button onClick={(e)=>{e.stopPropagation();r.toggleCli(c.cnpj);}}
+        className={`w-5 h-5 rounded border-2 ${isInc?"bg-emerald-600 border-emerald-600":"border-slate-400"} flex items-center justify-center text-white text-[10px] shrink-0`}>
+        {isInc?"✓":""}
+      </button>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-semibold truncate">{c.cli.name}</div>
+        <div className="text-[10px] text-slate-400 truncate">{c.cli.neighborhood||"—"} · {sc.label}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TELA SUPERVISOR — Ranking + Clientes para recuperar
+   ============================================================ */
+function TelaSupervisor(props) {
+  const { engine, setSellerAndGoHoje, setDrawerCnpj } = props;
+  const [aba, setAba] = useState("ranking");
+  const ranking = useMemo(() => {
+    return engine.sellers.filter(s => s.internal_code).map(s => {
+      const lista = engine.clientesDoVendedor(s);
+      const cart = s.cpf && engine.carteiraByCpf.get(s.cpf) ? engine.carteiraByCpf.get(s.cpf).size : 0;
+      const rot = engine.rotByCode.get(s.internal_code)?.length || 0;
+      const cont = lista.reduce((a,x) => { a[x.status]=(a[x.status]||0)+1; return a; }, {});
+      const semRecente = lista.filter(x => x.status==="CRITICO" || x.status==="SEM_HIST").length;
+      return { seller: s, cart, rot, critico:cont.CRITICO||0, semHist:cont.SEM_HIST||0,
+        risco: cart>0 ? semRecente/cart : 0, semRecente };
+    }).sort((a,b) => b.risco - a.risco);
+  }, [engine]);
+  const criticosTodos = useMemo(() => {
+    const arr = [];
+    engine.cliByCnpj.forEach((cli, cnpj) => {
+      const v = engine.vendasByCnpj.get(cnpj) || [];
+      const ult = v.reduce((a,x)=>(x.date&&(!a||x.date>a))?x.date:a, null);
+      const dias = ult ? daysBetween(ult, engine.refDate) : null;
+      let st = "SEM_HIST";
+      if (ult) st = dias>90?"CRITICO":dias>30?"ATENCAO":"EM_DIA";
+      if (st === "CRITICO" || st === "SEM_HIST") {
+        const obj = { cnpj, cli, ultVenda: ult, totVenda: v.reduce((a,x)=>a+x.valor,0), numVenda: v.length, diasSemVenda: dias, status: st, vendasCli: v, naCarteira: false, noRoteiro: false };
+        obj.score = engine.scoreCliente(obj);
+        arr.push(obj);
+      }
+    });
+    return arr.sort((a,b) => b.score.total - a.score.total);
+  }, [engine]);
+  const totalCriticos = ranking.reduce((a,r)=>a+r.critico+r.semHist,0);
+  const rotasProblema = ranking.filter(r => r.rot===0 || r.risco > 0.5).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiSimples label="Vendedores ativos" value={ranking.length} cor="blue" />
+        <KpiSimples label="Clientes para recuperar" value={totalCriticos} cor={totalCriticos>0?"rose":"slate"} />
+        <KpiSimples label="Rotas com problema" value={rotasProblema} cor={rotasProblema>0?"amber":"emerald"} />
+        <KpiSimples label="Carteira total" value={ranking.reduce((a,r)=>a+r.cart,0)} cor="slate" />
+      </div>
+      <div className="flex bg-white/5 rounded-xl p-1">
+        <button onClick={()=>setAba("ranking")} className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold ${aba==="ranking"?"bg-white/15":""}`}>Equipe</button>
+        <button onClick={()=>setAba("criticos")} className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold ${aba==="criticos"?"bg-white/15":""}`}>
+          Clientes para recuperar
+          {criticosTodos.length>0 && <span className="ml-1 text-[10px] text-rose-300">({criticosTodos.length})</span>}
+        </button>
+      </div>
+      {aba === "ranking" && (
+        <div className="glass rounded-2xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white/5 text-xs text-slate-400 uppercase">
+                <tr>
+                  <th className="text-left p-3">Vendedor</th>
+                  <th className="text-right p-3">Carteira</th>
+                  <th className="text-right p-3">Em rota</th>
+                  <th className="text-right p-3">Para recuperar</th>
+                  <th className="text-right p-3">Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {ranking.map(r => {
+                  const corS = r.risco > 0.5 ? "bg-rose-600" : r.risco > 0.25 ? "bg-amber-500" : "bg-emerald-600";
+                  const labS = r.risco > 0.5 ? "Crítico" : r.risco > 0.25 ? "Atenção" : "OK";
+                  return (
+                    <tr key={r.seller.internal_code} className="hover:bg-white/5">
+                      <td className="p-3">
+                        <div className="font-semibold">{r.seller.name}</div>
+                        {!r.seller.ativo && <div className="text-[10px] text-rose-300">inativo</div>}
+                      </td>
+                      <td className="p-3 text-right">{fmtInt(r.cart)}</td>
+                      <td className="p-3 text-right">{fmtInt(r.rot)}</td>
+                      <td className="p-3 text-right font-bold">{fmtInt(r.critico + r.semHist)}</td>
+                      <td className="p-3 text-right"><span className={`badge ${corS} text-white text-[10px]`}>{labS}</span></td>
+                      <td className="p-3 text-right">
+                        <button onClick={()=>setSellerAndGoHoje(r.seller.internal_code)} className="text-xs text-blue-300 hover:underline">Ver rota →</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {aba === "criticos" && (
+        <div className="glass rounded-2xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white/5 text-xs text-slate-400 uppercase">
+                <tr>
+                  <th className="text-left p-3">Cliente</th>
+                  <th className="text-left p-3">Vendedor</th>
+                  <th className="text-left p-3">Local</th>
+                  <th className="text-right p-3">Dias sem comprar</th>
+                  <th className="text-left p-3">Ação sugerida</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {criticosTodos.slice(0, 100).map(c => {
+                  const acao = c.status === "SEM_HIST" ? "Confirmar atividade" : "Visitar para recuperar";
+                  return (
+                    <tr key={c.cnpj} className="hover:bg-white/5 cursor-pointer" onClick={() => setDrawerCnpj(c.cnpj)}>
+                      <td className="p-3">
+                        <div className="font-medium truncate max-w-xs">{c.cli.name}</div>
+                        <div className="text-[10px] text-slate-400">{c.cli.ramo||c.cli.tag||"—"}</div>
+                      </td>
+                      <td className="p-3 text-xs">{c.cli.seller?.split(" - ")[1] || "—"}</td>
+                      <td className="p-3 text-xs">{c.cli.neighborhood||"—"} · {c.cli.city||"—"}</td>
+                      <td className="p-3 text-right"><b className={c.diasSemVenda===null?"text-slate-400":"text-rose-300"}>{c.diasSemVenda ?? "—"}</b></td>
+                      <td className="p-3 text-xs text-slate-300">{acao}</td>
+                      <td className="p-3 text-right text-xs text-blue-300">→</td>
+                    </tr>
+                  );
+                })}
+                {criticosTodos.length === 0 && (
+                  <tr><td colSpan="6" className="p-8 text-center text-sm text-slate-400">Nenhum cliente para recuperar.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {criticosTodos.length > 100 && <div className="px-4 py-2 text-[10px] text-slate-500 text-center border-t border-white/10">Mostrando 100 de {criticosTodos.length}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   PRODUTOS (renomeio do Informativo)
+   ============================================================ */
+function Produtos(props) {
+  const { engine, promos = [], jornal, setJornal } = props;
+  const fileRef = useRef(null);
+  const [busca, setBusca] = useState("");
+  const [loadingPdf, setLoadingPdf] = useState(false);
+  const lista = useMemo(() => {
+    const out = [];
+    engine.estByEan.forEach((est, ean) => {
+      const prod = engine.prodByEan.get(ean);
+      const promo = promos.find(p => p.ean === ean);
+      out.push({ ean, sku: prod?.sku, prod, est, promo });
+    });
+    if (busca) {
+      const b = busca.toLowerCase();
+      return out.filter(p =>
+        (p.prod?.name||"").toLowerCase().includes(b) ||
+        (p.prod?.brand||"").toLowerCase().includes(b) ||
+        (p.prod?.manufacturer||"").toLowerCase().includes(b) ||
+        (p.prod?.category||"").toLowerCase().includes(b) ||
+        (p.sku||"").includes(b) || (p.ean||"").includes(b)
+      );
+    }
+    return out.sort((a,b) => { if (!!a.promo !== !!b.promo) return a.promo ? -1 : 1; return (b.est.qtd||0) - (a.est.qtd||0); });
+  }, [engine, promos, busca]);
+  const handleUpload = async (file) => {
+    if (!file) return;
+    setLoadingPdf(true);
+    try { const ext = await pdfExtractTextAndImages(file); setJornal({ fileName: file.name, ...ext }); }
+    catch (e) { alert("Erro ao ler PDF: " + e.message); }
+    setLoadingPdf(false);
+  };
+  return (
+    <div className="space-y-4">
+      <div className="glass rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-lg font-bold">📦 Produtos</div>
+          <div className="text-xs text-slate-400">
+            {jornal ? `Informativo do mês carregado · ${promos.length} produtos em destaque` : "Carregue o informativo do mês (PDF) para ativar oportunidades"}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={(e)=>handleUpload(e.target.files?.[0])} className="hidden" />
+          <button onClick={()=>fileRef.current?.click()} className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm">
+            {loadingPdf ? "Lendo PDF…" : (jornal ? "Trocar PDF" : "Carregar PDF")}
+          </button>
+          <input value={busca} onChange={(e)=>setBusca(e.target.value)} placeholder="Buscar produto…"
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 w-60" />
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+        {lista.slice(0,60).map(p => (
+          <div key={p.ean} className={`glass rounded-2xl p-3 flex gap-3 ${p.promo ? "border border-amber-500/30" : ""}`}>
+            <ProductImage ean={p.ean} sku={p.sku} prod={p.prod} size="lg" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold truncate">{p.prod?.name || `Produto ${p.sku||p.ean}`}</div>
+              <div className="text-[10px] text-slate-400">{p.prod?.brand}</div>
+              <div className="mt-2 text-sm">
+                {p.est.list_price>0 && <div className="font-bold">{fmtMoney(p.est.list_price)}</div>}
+                <div className="text-[10px] text-slate-400">Estoque {fmtInt(p.est.qtd)}</div>
+              </div>
+              {p.promo && (<div className="mt-2 text-[10px] text-amber-300 font-bold">📰 No informativo {p.promo.descontoPct ? ` · ${Math.abs(p.promo.descontoPct)}% off` : ""}</div>)}
+            </div>
+          </div>
+        ))}
+        {lista.length===0 && <div className="col-span-full text-sm text-slate-400 text-center py-12">Nenhum produto encontrado.</div>}
+      </div>
+    </div>
+  );
+}
+
+/* Error Boundary */
 class ErrorBoundary extends React.Component {
   constructor(p) { super(p); this.state = { error: null, info: null }; }
   static getDerivedStateFromError(error) { return { error }; }
