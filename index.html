@@ -472,6 +472,105 @@ const parseCSV = (file) => new Promise((resolve, reject) => {
 });
 
 /* ============================================================
+   PARSERS DAS BASES OPCIONAIS V4
+   Tolerantes a variações de nome de coluna.
+   ============================================================ */
+const pick = (obj, keys) => {
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== "") return obj[k];
+  }
+  return null;
+};
+const monthKey = (yyyy, mm) => `${yyyy}-${String(mm).padStart(2,'0')}`;
+
+// Metas — Vendedor × Mês
+function parseMetasRaw(rows) {
+  const out = [];
+  (rows||[]).forEach(r => {
+    const code = String(pick(r, ["seller_internal_code","internal_code","codigo","cod_vendedor","cod_int"])||"").trim();
+    const cpf = normCPF(pick(r, ["seller_cpf","cpf","cpf_vendedor"]));
+    const name = pick(r, ["seller_name","nome_vendedor","name","nome"]);
+    const month = parseInt(pick(r, ["month","mes","mês"])||0);
+    const year = parseInt(pick(r, ["year","ano"])||0);
+    const revGoal = parseNum(pick(r, ["revenue_goal","meta_faturamento","meta","meta_valor","goal_revenue"]));
+    const revReal = parseNum(pick(r, ["revenue_realized","realizado","faturamento_realizado","realizado_valor"]));
+    const posGoal = parseNum(pick(r, ["positivity_goal","meta_positivacao","meta_positiv","meta_pos"]));
+    const posReal = parseNum(pick(r, ["positivity_realized","positivacao_realizada","realizado_pos"]));
+    const industry = pick(r, ["industry","industria","indústria"]);
+    const manufacturer = pick(r, ["manufacturer","fabricante"]);
+    const supervisor = pick(r, ["supervisor"]);
+    if (!code && !cpf && !name) return;
+    out.push({
+      code, cpf, name, month, year, revGoal, revReal, posGoal, posReal,
+      industry, manufacturer, supervisor,
+      mkey: (month && year) ? monthKey(year, month) : null,
+    });
+  });
+  return out;
+}
+
+// Mix Gold — produtos esperados por canal/indústria/categoria
+function parseMixGoldRaw(rows) {
+  return (rows||[]).map(r => ({
+    manufacturer: pick(r, ["manufacturer","fabricante"]),
+    brand: pick(r, ["brand","marca"]),
+    family: pick(r, ["family","familia","família"]),
+    category: pick(r, ["category","categoria"]),
+    channel: pick(r, ["channel","canal"]),
+    segment: pick(r, ["segment","segmento"]),
+    sku: String(pick(r, ["sku","product_code","internal_code","cod","codigo"])||"").trim(),
+    ean: String(pick(r, ["ean","gtin","codigo_barras","cod_barras"])||"").trim(),
+    dun: String(pick(r, ["dun","dun14"])||"").trim(),
+    name: pick(r, ["product_name","nome_produto","produto","name"]),
+    suggested_quantity: parseNum(pick(r, ["suggested_quantity","qtd_sugerida"])),
+    min_quantity: parseNum(pick(r, ["min_quantity","qtd_min","quantidade_min"])),
+    priority: parseInt(pick(r, ["priority","prioridade"])||0),
+    required: ["true","1","sim","s","yes"].includes(String(pick(r,["required","obrigatorio","obg"])||"").toLowerCase()),
+  })).filter(p => p.sku || p.ean);
+}
+
+// Campanhas estruturadas
+function parseCampanhasCSVRaw(rows) {
+  return (rows||[]).map(r => ({
+    campaign_id: pick(r, ["campaign_id","id","id_campanha"]),
+    campaign_name: pick(r, ["campaign_name","nome_campanha","nome","name"]),
+    start_date: parseDateBR(pick(r, ["start_date","inicio","data_inicio"])),
+    end_date: parseDateBR(pick(r, ["end_date","fim","data_fim"])),
+    sku: String(pick(r, ["sku","product_code","internal_code"])||"").trim(),
+    ean: String(pick(r, ["ean","gtin"])||"").trim(),
+    dun: String(pick(r, ["dun"])||"").trim(),
+    product_name: pick(r, ["product_name","produto","nome_produto"]),
+    discount: parseNum(pick(r, ["discount","desconto","desc"])),
+    bonus: pick(r, ["bonus","bonificacao"]),
+    campaign_type: pick(r, ["campaign_type","tipo"]),
+    manufacturer: pick(r, ["manufacturer","fabricante"]),
+    category: pick(r, ["category","categoria"]),
+    channel: pick(r, ["channel","canal"]),
+    min_quantity: parseNum(pick(r, ["min_quantity","qtd_min"])),
+    suggested_quantity: parseNum(pick(r, ["suggested_quantity","qtd_sugerida"])),
+    image_url: pick(r, ["image_url","url_imagem","img"]),
+    source: pick(r, ["source","origem"]),
+  })).filter(c => c.sku || c.ean);
+}
+
+// De/Para de produtos e imagens
+function parseDeParaRaw(rows) {
+  return (rows||[]).map(r => ({
+    internal_code: String(pick(r, ["internal_code","cod_int","codigo_interno","code"])||"").trim(),
+    sku: String(pick(r, ["sku","product_code"])||"").trim(),
+    ean: String(pick(r, ["ean","gtin","codigo_barras"])||"").trim(),
+    dun: String(pick(r, ["dun","dun14"])||"").trim(),
+    product_name: pick(r, ["product_name","produto","name","nome"]),
+    brand: pick(r, ["brand","marca"]),
+    manufacturer: pick(r, ["manufacturer","fabricante"]),
+    image_url: pick(r, ["image_url","url_imagem","img","foto"]),
+    search_term: pick(r, ["search_term","termo_busca"]),
+    source: pick(r, ["source","origem"]),
+    confidence: pick(r, ["confidence","confianca"]),
+  })).filter(p => p.internal_code || p.sku || p.ean);
+}
+
+/* ============================================================
    ENGINE
    ============================================================ */
 function buildEngine(data) {
@@ -867,6 +966,457 @@ function ProductImage({ ean, sku, prod, size="sm" }) {
 }
 
 /* ============================================================
+   SALES INTELLIGENCE ENGINE — V4
+   Camada lógica que processa engine + metas + mix gold + campanhas + de/para
+   Gera saídas por vendedor, por cliente e por produto.
+   ============================================================ */
+function buildSalesIntel(engine, opts = {}) {
+  const { metas = [], mixGold = [], campanhasEst = [], dePara = [], refMes = null } = opts;
+
+  // Mês de referência: se não vier, usa o mês da maior data de vendas
+  const ref = refMes || (engine.refDate ? { y: engine.refDate.getFullYear(), m: engine.refDate.getMonth()+1 } : null);
+  const mkey = ref ? monthKey(ref.y, ref.m) : null;
+
+  // Indexa metas por code/cpf no mês
+  const metasByCode = new Map(), metasByCpf = new Map();
+  metas.forEach(m => {
+    if (mkey && m.mkey && m.mkey !== mkey) return;
+    if (m.code) metasByCode.set(m.code, m);
+    if (m.cpf) metasByCpf.set(m.cpf, m);
+  });
+
+  // De/Para: lookup por internal_code/sku
+  const dpByCode = new Map(), dpBySku = new Map(), dpByEan = new Map();
+  dePara.forEach(d => {
+    if (d.internal_code) dpByCode.set(d.internal_code, d);
+    if (d.sku) dpBySku.set(d.sku, d);
+    if (d.ean) dpByEan.set(d.ean, d);
+  });
+  // Resolve metadados de produto: ordem De/Para → Produtos.csv → Vendas (sku/ean apenas)
+  const resolveProduto = (ean, sku) => {
+    const dp = (ean && dpByEan.get(String(ean))) || (sku && dpBySku.get(String(sku))) || null;
+    const prod = (ean && engine.prodByEan.get(String(ean))) || (sku && engine.prodBySku.get(String(sku))) || null;
+    return {
+      ean: ean || dp?.ean || prod?.ean || null,
+      sku: sku || dp?.sku || prod?.sku || null,
+      name: dp?.product_name || prod?.name || null,
+      brand: dp?.brand || prod?.brand || null,
+      manufacturer: dp?.manufacturer || prod?.manufacturer || null,
+      category: prod?.category || null,
+      channel: null, // não temos cadastro de canal por produto
+      image_url: dp?.image_url || null,
+      image_source: dp?.image_url ? "dePara" : null,
+      dpConfidence: dp?.confidence || null,
+    };
+  };
+
+  // Mix Gold: indexa por canal e por categoria
+  const mixByCanal = new Map();      // canal → lista de itens mix
+  const mixByCategoria = new Map();
+  mixGold.forEach(m => {
+    if (m.channel) {
+      if (!mixByCanal.has(m.channel)) mixByCanal.set(m.channel, []);
+      mixByCanal.get(m.channel).push(m);
+    }
+    if (m.category) {
+      if (!mixByCategoria.has(m.category)) mixByCategoria.set(m.category, []);
+      mixByCategoria.get(m.category).push(m);
+    }
+  });
+
+  // Campanhas estruturadas: indexa por EAN/SKU
+  const campsByEan = new Map(), campsBySku = new Map();
+  campanhasEst.forEach(c => {
+    if (c.ean) campsByEan.set(c.ean, c);
+    if (c.sku) campsBySku.set(c.sku, c);
+  });
+
+  /* ----------- Cálculo do mês: realizado + positivação ----------- */
+  function realizadoVendedor(seller) {
+    if (!seller || !mkey) return { revenue: 0, positivacao: 0, clientesPositivados: new Set(), pedidos: 0, volume: 0 };
+    const code = seller.internal_code;
+    const vendas = engine.vendasByVendedorCode.get(code) || [];
+    let rev = 0, pedidos = 0, volume = 0;
+    const positivados = new Set();
+    vendas.forEach(v => {
+      if (!v.date) return;
+      const vMkey = monthKey(v.date.getFullYear(), v.date.getMonth()+1);
+      if (vMkey !== mkey) return;
+      rev += v.valor;
+      pedidos++; volume += v.volume;
+      if (v.cnpj) positivados.add(v.cnpj);
+    });
+    return { revenue: rev, positivacao: positivados.size, clientesPositivados: positivados, pedidos, volume };
+  }
+
+  function statusVendedor(seller) {
+    if (!seller) return null;
+    const real = realizadoVendedor(seller);
+    const meta = metasByCode.get(seller.internal_code) || metasByCpf.get(seller.cpf) || null;
+    const revGoal = meta?.revGoal || 0;
+    const posGoal = meta?.posGoal || 0;
+    const revReal = real.revenue;
+    const posReal = real.positivacao;
+    return {
+      seller, real, meta,
+      revGoal, revReal,
+      revGap: revGoal>0 ? Math.max(0, revGoal - revReal) : null,
+      revPct: revGoal>0 ? revReal/revGoal : null,
+      posGoal, posReal,
+      posGap: posGoal>0 ? Math.max(0, posGoal - posReal) : null,
+      posPct: posGoal>0 ? posReal/posGoal : null,
+      clientesPositivados: real.clientesPositivados,
+      hasMeta: !!meta,
+    };
+  }
+
+  /* ----------- Recorrência por (cliente, EAN) ----------- */
+  function recorrenciaCliente(c) {
+    const map = new Map(); // ean → { compras: [{date,qtd,valor}], avgInt, medInt, lastDate, freq, avgQtd, avgValor }
+    (c.vendasCli||[]).forEach(v => {
+      if (!v.ean || !v.date) return;
+      if (!map.has(v.ean)) map.set(v.ean, { ean: v.ean, sku: v.sku, compras: [], lastDate: null, freq: 0 });
+      const r = map.get(v.ean);
+      r.compras.push({ date: v.date, qtd: v.volume, valor: v.valor });
+      r.freq++;
+      if (!r.lastDate || v.date > r.lastDate) r.lastDate = v.date;
+    });
+    map.forEach(r => {
+      r.compras.sort((a,b)=>a.date-b.date);
+      const intervals = [];
+      for (let i=1; i<r.compras.length; i++) {
+        intervals.push((r.compras[i].date - r.compras[i-1].date) / 86400000);
+      }
+      r.avgInt = intervals.length ? intervals.reduce((a,b)=>a+b,0)/intervals.length : null;
+      const sorted = [...intervals].sort((a,b)=>a-b);
+      r.medInt = sorted.length ? sorted[Math.floor(sorted.length/2)] : null;
+      r.diasUlt = r.lastDate ? daysBetween(r.lastDate, engine.refDate) : null;
+      r.avgQtd = r.compras.length ? r.compras.reduce((a,c)=>a+c.qtd,0)/r.compras.length : 0;
+      r.avgValor = r.compras.length ? r.compras.reduce((a,c)=>a+c.valor,0)/r.compras.length : 0;
+      r.lastQtd = r.compras.length ? r.compras[r.compras.length-1].qtd : 0;
+      r.lastValor = r.compras.length ? r.compras[r.compras.length-1].valor : 0;
+    });
+    return map;
+  }
+
+  /* ----------- Classificação por SKU (rotina / recompra / recuperação / esquecido) ----------- */
+  function classificaSku(r, eansUltima) {
+    if (!r) return "novo";
+    const f = r.freq;
+    if (f < 2) return "baixa_freq";
+    const naUlt = eansUltima.has(r.ean);
+    const dias = r.diasUlt;
+    const interv = r.avgInt;
+    if (interv === null) return naUlt ? "rotina" : "esquecido";
+    if (dias > interv * 1.2) return "recuperacao";
+    if (dias >= interv * 0.8) return "recompra_proxima";
+    if (naUlt) return "rotina";
+    if (f >= 3) return "rotina";
+    return "esquecido";
+  }
+
+  /* ----------- Estimativa de preço — hierarquia ----------- */
+  // pré-computa preço médio por EAN no canal/carteira
+  const precoMedioByEan = new Map(); // ean → { all: avg, canal: { canal: avg }, vendedor: { code: avg } }
+  engine.vendasByCnpjEan.forEach(v => {
+    if (!v.qtd || !v.valor) return;
+    const p = v.valor / Math.max(1, v.qtd);
+    if (!precoMedioByEan.has(v.ean)) precoMedioByEan.set(v.ean, { soma:0, n:0 });
+    const acc = precoMedioByEan.get(v.ean);
+    acc.soma += p; acc.n++;
+  });
+  function estimaPrecoSKU(ean, cliente, seller) {
+    // 1) preço médio histórico do cliente
+    const cvs = (cliente.vendasCli||[]).filter(v => v.ean === ean && v.qtd > 0);
+    if (cvs.length > 0) {
+      const sum = cvs.reduce((a,v)=>a+(v.valor/Math.max(1,v.qtd))*v.qtd, 0);
+      const tot = cvs.reduce((a,v)=>a+v.qtd, 0);
+      if (tot > 0) return { valor: sum/tot, origem: "histórico do cliente", conf: "alta" };
+    }
+    // 2) preço médio na carteira do vendedor
+    if (seller?.internal_code) {
+      const sv = (engine.vendasByVendedorCode.get(seller.internal_code) || [])
+        .filter(v => v.ean === ean && v.qtd > 0);
+      if (sv.length > 0) {
+        const sum = sv.reduce((a,v)=>a+v.valor, 0);
+        const tot = sv.reduce((a,v)=>a+v.qtd, 0);
+        if (tot > 0) return { valor: sum/tot, origem: "preço médio na carteira do vendedor", conf: "média" };
+      }
+    }
+    // 3) preço médio geral
+    const acc = precoMedioByEan.get(ean);
+    if (acc && acc.n > 0) return { valor: acc.soma/acc.n, origem: "preço médio do canal", conf: "média" };
+    // 4) list_price do estoque
+    const est = engine.estByEan.get(ean);
+    if (est?.list_price > 0) return { valor: est.list_price, origem: "preço de lista", conf: "baixa" };
+    return { valor: null, origem: "sem preço confiável", conf: "baixa" };
+  }
+
+  function estimaQuantidade(ean, cliente, recor, mixItem, camp) {
+    if (recor?.avgQtd > 0) return { qtd: Math.round(recor.avgQtd), origem: "média histórica do cliente" };
+    if (recor?.lastQtd > 0) return { qtd: recor.lastQtd, origem: "última compra" };
+    if (mixItem?.suggested_quantity > 0) return { qtd: mixItem.suggested_quantity, origem: "Mix Gold" };
+    if (camp?.min_quantity > 0) return { qtd: camp.min_quantity, origem: "campanha" };
+    if (camp?.suggested_quantity > 0) return { qtd: camp.suggested_quantity, origem: "campanha" };
+    return { qtd: null, origem: "sem sugestão" };
+  }
+
+  /* ----------- Oportunidade por canal: clientes semelhantes ----------- */
+  // Pré-computa: para cada canal/ramo, quais EANs são mais comprados
+  const eansPopByCanal = new Map(); // canal → Map(ean → count)
+  engine.cliByCnpj.forEach((cli, cnpj) => {
+    const canal = cli.ramo || cli.tag || cli.channel;
+    if (!canal) return;
+    if (!eansPopByCanal.has(canal)) eansPopByCanal.set(canal, new Map());
+    const m = eansPopByCanal.get(canal);
+    const vs = engine.vendasByCnpj.get(cnpj) || [];
+    const eansClienteSet = new Set(vs.map(v => v.ean).filter(Boolean));
+    eansClienteSet.forEach(e => m.set(e, (m.get(e)||0) + 1));
+  });
+
+  /* ----------- Cesta Inteligente por cliente ----------- */
+  function cestaCliente(cliente, seller) {
+    if (!cliente) return null;
+    const recor = recorrenciaCliente(cliente);
+    const ultDate = cliente.ultVenda;
+    const eansUltima = new Set((cliente.vendasCli||[])
+      .filter(v => v.date && ultDate && v.date.getTime() === ultDate.getTime())
+      .map(v => v.ean));
+    const canal = cliente.cli?.ramo || cliente.cli?.tag || cliente.cli?.channel;
+
+    const skus = []; // todos os candidatos com tipo, confiança, valor
+
+    // 1) Rotina + recompra + recuperação + esquecido (do histórico)
+    recor.forEach((r, ean) => {
+      const tipo = classificaSku(r, eansUltima);
+      const est = engine.estByEan.get(ean);
+      const camp = campsByEan.get(ean) || (r.sku && campsBySku.get(r.sku));
+      const mixItem = null;
+      const prodMeta = resolveProduto(ean, r.sku);
+      const preco = estimaPrecoSKU(ean, cliente, seller);
+      const qtd = estimaQuantidade(ean, cliente, r, mixItem, camp);
+      const valorEst = preco.valor && qtd.qtd ? preco.valor * qtd.qtd : null;
+      let conf = "média", bloqueado = false, motivo = "";
+      if (!est || est.qtd <= 0) { conf = "baixa"; bloqueado = !!camp ? false : true; motivo = "Sem estoque cadastrado."; }
+      if (tipo === "rotina") { conf = est?.qtd > 0 ? "alta" : "média"; motivo = `Cliente compra com frequência (${r.freq}×). Não esquecer.`; }
+      if (tipo === "recompra_proxima") { conf = est?.qtd > 0 ? "alta" : "média"; motivo = `Provável recompra: ${r.diasUlt}d desde a última (média ${Math.round(r.avgInt||0)}d).`; }
+      if (tipo === "recuperacao") { motivo = `Já comprava (${r.freq}×) mas está há ${r.diasUlt}d sem comprar. Tente recuperar.`; }
+      if (tipo === "esquecido") { motivo = `Comprava e ficou de fora da última compra.`; }
+      skus.push({
+        ean, sku: r.sku, prod: prodMeta, est, recor: r, camp,
+        tipo, tipoLabel: tipoLabel(tipo),
+        preco, qtd, valorEst,
+        conf: bloqueado ? "bloqueada" : conf,
+        bloqueado, motivo,
+      });
+    });
+
+    // 2) Mix Gold para o canal do cliente — adiciona se cliente não compra
+    const eansCliente = new Set(Array.from(recor.keys()));
+    const mixCanal = mixByCanal.get(canal) || [];
+    mixCanal.forEach(m => {
+      const eanKey = m.ean;
+      if (!eanKey || eansCliente.has(eanKey)) return; // já compra
+      const est = engine.estByEan.get(eanKey);
+      const camp = campsByEan.get(eanKey) || (m.sku && campsBySku.get(m.sku));
+      const prodMeta = resolveProduto(eanKey, m.sku);
+      const preco = estimaPrecoSKU(eanKey, cliente, seller);
+      const qtd = estimaQuantidade(eanKey, cliente, null, m, camp);
+      const valorEst = preco.valor && qtd.qtd ? preco.valor * qtd.qtd : null;
+      let conf = est?.qtd > 0 ? "média" : "baixa";
+      let bloqueado = !est || est.qtd <= 0;
+      skus.push({
+        ean: eanKey, sku: m.sku, prod: { ...prodMeta, name: m.name || prodMeta.name },
+        est, recor: null, camp, mixItem: m,
+        tipo: "mix_gold",
+        tipoLabel: tipoLabel("mix_gold"),
+        preco, qtd, valorEst,
+        conf: bloqueado ? "bloqueada" : conf, bloqueado,
+        motivo: `Item do Mix Gold para o canal "${canal||"—"}". Cliente ainda não compra.`,
+      });
+    });
+
+    // 3) Oportunidade por canal: top EANs do canal que o cliente não compra
+    if (canal && eansPopByCanal.has(canal)) {
+      const popMap = eansPopByCanal.get(canal);
+      const sortedEans = Array.from(popMap.entries()).sort((a,b)=>b[1]-a[1]).slice(0, 30);
+      sortedEans.forEach(([eanKey, count]) => {
+        if (eansCliente.has(eanKey)) return;
+        if (skus.some(s => s.ean === eanKey)) return; // já incluído via mix gold ou outro
+        if (count < 2) return; // ao menos 2 clientes similares
+        const est = engine.estByEan.get(eanKey);
+        const camp = campsByEan.get(eanKey);
+        const prodMeta = resolveProduto(eanKey, null);
+        const preco = estimaPrecoSKU(eanKey, cliente, seller);
+        const qtd = estimaQuantidade(eanKey, cliente, null, null, camp);
+        const valorEst = preco.valor && qtd.qtd ? preco.valor * qtd.qtd : null;
+        const bloqueado = !est || est.qtd <= 0;
+        skus.push({
+          ean: eanKey, prod: prodMeta, est, camp, recor: null,
+          tipo: "oportunidade_canal",
+          tipoLabel: tipoLabel("oportunidade_canal"),
+          preco, qtd, valorEst,
+          conf: bloqueado ? "bloqueada" : "média", bloqueado,
+          motivo: `${count} clientes do canal "${canal}" compram. Cliente ainda não compra.`,
+        });
+      });
+    }
+
+    // 4) Campanha — aplicar campanha vigente em SKU já comprado (vira "campanha + rotina")
+    // Não duplicamos; o flag camp já está nos itens acima
+
+    return { canal, skus, recor };
+  }
+
+  function tipoLabel(t) {
+    return ({
+      rotina: "Rotina",
+      recompra_proxima: "Recompra próxima",
+      recuperacao: "Recuperação",
+      esquecido: "Esquecido",
+      mix_gold: "Mix Gold",
+      oportunidade_canal: "Oportunidade por canal",
+      campanha: "Campanha",
+      baixa_freq: "Baixa frequência",
+    })[t] || t;
+  }
+
+  /* ----------- Combos derivados ----------- */
+  function gerarCombos(cliente, seller, statusVend, jaPositivadoMes) {
+    const cesta = cestaCliente(cliente, seller);
+    if (!cesta) return [];
+    const { skus } = cesta;
+    const validos = skus.filter(s => !s.bloqueado);
+
+    const combo = (id, nome, items, motivo, tipoCombo) => {
+      const skusCombo = items.slice(0, 5);
+      const valor = skusCombo.reduce((a, s) => a + (s.valorEst || 0), 0);
+      const semPreco = skusCombo.some(s => !s.preco?.valor);
+      const conf = skusCombo.every(s => s.conf === "alta") ? "alta"
+                 : skusCombo.some(s => s.conf === "alta") ? "média"
+                 : "baixa";
+      let impactoFat = null, impactoGap = null, impactoPos = 0;
+      if (statusVend?.revGoal > 0 && valor > 0) {
+        impactoFat = valor / statusVend.revGoal;
+        if (statusVend.revGap > 0) impactoGap = valor / statusVend.revGap;
+      }
+      if (statusVend?.posGap > 0 && !jaPositivadoMes && valor > 0) {
+        impactoPos = 1 / statusVend.posGap;
+      }
+      return {
+        id, nome, motivo, tipoCombo,
+        skus: skusCombo,
+        valor: semPreco ? null : valor,
+        semPreco,
+        conf,
+        impactoFat, impactoGap, impactoPos,
+      };
+    };
+
+    const out = [];
+    const rotina = validos.filter(s => s.tipo === "rotina");
+    if (rotina.length) out.push(combo("rotina", "Não esquecer (Rotina)", rotina, "Itens que o cliente compra com frequência.", "rotina"));
+    const recompra = validos.filter(s => s.tipo === "recompra_proxima");
+    if (recompra.length) out.push(combo("recompra", "Recompra provável", recompra, "Próximo do ciclo de recompra histórico.", "recompra"));
+    const recuperacao = validos.filter(s => s.tipo === "recuperacao" || s.tipo === "esquecido");
+    if (recuperacao.length) out.push(combo("recuperacao", "Recuperar produtos", recuperacao, "Itens que o cliente comprava e parou.", "recuperacao"));
+    const mixG = validos.filter(s => s.tipo === "mix_gold");
+    if (mixG.length) out.push(combo("mixgold", "Mix Gold (falta introduzir)", mixG, "Mix esperado para o canal/categoria do cliente.", "mixgold"));
+    const camp = validos.filter(s => !!s.camp);
+    if (camp.length) out.push(combo("campanha", "Em campanha", camp, "Itens em ação comercial vigente.", "campanha"));
+    const opCanal = validos.filter(s => s.tipo === "oportunidade_canal");
+    if (opCanal.length) out.push(combo("oportunidade", "Oportunidade por canal", opCanal, "Clientes do mesmo canal compram.", "oportunidade"));
+
+    // Combo POSITIVAÇÃO: cesta mínima alta confiança (só se cliente não positivou no mês)
+    if (!jaPositivadoMes) {
+      const altaConf = validos.filter(s => s.conf === "alta").slice(0, 2);
+      if (altaConf.length) {
+        out.push(combo("positivacao", "Cesta de positivação", altaConf,
+          "Cesta mínima de alta confiança para garantir positivação do cliente no mês.", "positivacao"));
+      }
+    }
+
+    // Combo FATURAMENTO: top 5 SKUs por valor estimado
+    const porValor = [...validos].filter(s => s.valorEst > 0).sort((a,b) => b.valorEst - a.valorEst).slice(0,5);
+    if (porValor.length >= 2) {
+      out.push(combo("faturamento", "Combo de faturamento", porValor,
+        "Cesta com maior potencial de valor para contribuir com meta de faturamento.", "faturamento"));
+    }
+
+    // Combo EQUILIBRADO: mistura
+    const balance = [];
+    if (rotina[0]) balance.push(rotina[0]);
+    if (recompra[0]) balance.push(recompra[0]);
+    if (mixG[0]) balance.push(mixG[0]);
+    if (camp[0]) balance.push(camp[0]);
+    if (opCanal[0]) balance.push(opCanal[0]);
+    if (balance.length >= 3) out.push(combo("equilibrado", "Combo equilibrado", balance,
+      "Mistura rotina + recompra + Mix Gold + campanha + oportunidade.", "equilibrado"));
+
+    return out;
+  }
+
+  /* ----------- Argumento sugerido (script curto) ----------- */
+  function argumentoCliente(cliente, combos) {
+    if (!combos.length) return null;
+    const top = combos[0];
+    const ramo = cliente.cli?.ramo || cliente.cli?.tag || "este segmento";
+    const dias = cliente.diasSemVenda;
+    if (cliente.status === "CRITICO") {
+      return `Cliente sem comprar há ${dias} dias. Reabra com o combo "${top.nome}" — itens de alta aderência. Vale começar oferecendo a recompra dos itens de rotina antes de introduzir produto novo.`;
+    }
+    if (top.tipoCombo === "recompra") {
+      return `Cliente está próximo do ciclo de recompra. Apresente os itens de rotina primeiro e use ${top.skus.length} SKUs em ${ramo} como base da venda.`;
+    }
+    if (top.tipoCombo === "recuperacao") {
+      return `Cliente deixou de comprar produtos que comprava. Comece com a recuperação dos itens esquecidos, depois traga uma oportunidade nova.`;
+    }
+    if (top.tipoCombo === "mixgold") {
+      return `Falta Mix Gold para o canal de ${ramo}. Introduza um item por vez, começando pelo de maior aderência.`;
+    }
+    return `Use o combo "${top.nome}" como base. Comece pelos itens que o cliente já compra para garantir a venda, depois ofereça a oportunidade.`;
+  }
+
+  /* ----------- Saída por vendedor ----------- */
+  function intelPorVendedor(seller, rotaCnpjs = []) {
+    const status = statusVendedor(seller);
+    if (!seller || !status) return null;
+    const clientes = engine.clientesDoVendedor(seller).map(c => ({ ...c, score: engine.scoreCliente(c) }));
+    const rotaCnpjsSet = new Set(rotaCnpjs);
+    const jaPositivados = status.clientesPositivados;
+    // Para cada cliente da rota: calcula combos + impacto
+    const clientesIntel = clientes.map(c => {
+      const naRota = rotaCnpjsSet.has(c.cnpj);
+      const jaPos = jaPositivados.has(c.cnpj);
+      const combos = gerarCombos(c, seller, status, jaPos);
+      const top = combos[0] || null;
+      const valorPotencial = top?.valor || 0;
+      return { c, combos, top, valorPotencial, naRota, jaPositivouMes: jaPos };
+    });
+    // Rota: potencial agregado
+    const naRotaList = clientesIntel.filter(x => x.naRota);
+    const rotaPotFat = naRotaList.reduce((a,x)=>a+(x.valorPotencial||0),0);
+    const rotaPotPos = naRotaList.filter(x => !x.jaPositivouMes).length;
+    // Tops
+    const topClientes = clientesIntel
+      .filter(x => x.valorPotencial > 0)
+      .sort((a,b) => (b.valorPotencial||0) - (a.valorPotencial||0))
+      .slice(0,5);
+    const clientesNaoPositivados = clientes.filter(c => !jaPositivados.has(c.cnpj));
+    return { status, clientes: clientesIntel, topClientes, clientesNaoPositivados, rotaPotFat, rotaPotPos };
+  }
+
+  return {
+    ref, mkey,
+    statusVendedor, realizadoVendedor,
+    recorrenciaCliente, cestaCliente, gerarCombos, argumentoCliente,
+    intelPorVendedor,
+    resolveProduto, estimaPrecoSKU, estimaQuantidade,
+    eansPopByCanal, mixByCanal, campsByEan, campsBySku, metasByCode, metasByCpf,
+  };
+}
+
+/* ============================================================
    HOOK COMPARTILHADO: gerencia rota, geocoding, visitas
    Usado por TelaHoje e TelaRota para terem o mesmo estado.
    ============================================================ */
@@ -1079,7 +1629,9 @@ function useRota({ engine, seller, routeState, setRouteState, promos = [], campa
    APP
    ============================================================ */
 const TABS = [
+  { id:"meumes",     label:"Meu Mês",     icon:"🎯" },
   { id:"hoje",       label:"Hoje",        icon:"📍" },
+  { id:"cestas",     label:"Cestas",      icon:"🛒" },
   { id:"rota",       label:"Rota",        icon:"🗺️" },
   { id:"produtos",   label:"Produtos",    icon:"📦" },
   { id:"supervisor", label:"Supervisor",  icon:"👁️" },
@@ -1089,23 +1641,24 @@ const TABS = [
 function App() {
   const [data, setData] = useState(null);
   const [engine, setEngine] = useState(null);
-  const [tab, setTab] = useState("hoje");
+  const [tab, setTab] = useState("meumes");
   const [sellerCode, setSellerCode] = useState("");
   const [jornal, setJornal] = useState(null);
   const [promos, setPromos] = useState([]);
   const [campanhas, setCampanhas] = useState([]);
-  // Estado global compartilhado: planejamento da rota (incluídos, ordens, geo, visitas)
-  // levantado para topo para Hoje e Rota compartilharem o mesmo estado
+  // V4: bases opcionais
+  const [metasRaw, setMetasRaw] = useState([]);
+  const [mixGoldRaw, setMixGoldRaw] = useState([]);
+  const [campsCsv, setCampsCsv] = useState([]);
+  const [deParaRaw, setDeParaRaw] = useState([]);
+  // V4: meta manual simulada (quando não há planilha)
+  const [metaManual, setMetaManual] = useState(null); // { revGoal, posGoal }
+
   const [routeState, setRouteState] = useState({
-    incluidos: new Set(),
-    ordemManual: null,
-    ordemOtim: null,
-    otimizado: false,
-    geo: {},
-    route: null,
-    visitas: {},
+    incluidos: new Set(), ordemManual: null, ordemOtim: null, otimizado: false,
+    geo: {}, route: null, visitas: {},
   });
-  const [drawerCnpj, setDrawerCnpj] = useState(null); // cliente aberto no drawer
+  const [drawerCnpj, setDrawerCnpj] = useState(null);
 
   useEffect(() => { if (data) setEngine(buildEngine(data)); }, [data]);
   useEffect(() => {
@@ -1119,28 +1672,59 @@ function App() {
     if (jornal?.pages) setCampanhas(detectarCampanhas(jornal.pages));
   }, [jornal, engine]);
 
-  if (!data) return (<div className="min-h-screen"><Header /><UploadScreen onLoaded={(d,p) => { setData(d); if (p) setJornal(p); }} /></div>);
+  // Sales Intelligence Engine — calculado quando engine/bases mudam
+  const intel = useMemo(() => {
+    if (!engine) return null;
+    // Combina metas planilha + metaManual em uma lista
+    const metas = [...metasRaw];
+    if (metaManual && sellerCode) {
+      const seller = engine.sellers.find(s => s.internal_code === sellerCode);
+      if (seller && !metas.some(m => m.code === sellerCode)) {
+        const d = engine.refDate || new Date();
+        metas.push({
+          code: sellerCode, cpf: seller.cpf, name: seller.name,
+          month: d.getMonth()+1, year: d.getFullYear(),
+          revGoal: metaManual.revGoal || 0, posGoal: metaManual.posGoal || 0,
+          mkey: monthKey(d.getFullYear(), d.getMonth()+1),
+        });
+      }
+    }
+    return buildSalesIntel(engine, { metas, mixGold: mixGoldRaw, campanhasEst: campsCsv, dePara: deParaRaw });
+  }, [engine, metasRaw, mixGoldRaw, campsCsv, deParaRaw, metaManual, sellerCode]);
+
+  if (!data) return (<div className="min-h-screen"><Header /><UploadScreen onLoaded={(d, p, extras) => {
+    setData(d); if (p) setJornal(p);
+    if (extras?.metas) setMetasRaw(parseMetasRaw(extras.metas));
+    if (extras?.mixGold) setMixGoldRaw(parseMixGoldRaw(extras.mixGold));
+    if (extras?.campsCsv) setCampsCsv(parseCampanhasCSVRaw(extras.campsCsv));
+    if (extras?.dePara) setDeParaRaw(parseDeParaRaw(extras.dePara));
+  }} /></div>);
   if (!engine) return <div className="p-8 text-center">Construindo engine…</div>;
 
   const seller = engine.sellers.find(s => s.internal_code === sellerCode);
-  const shared = { engine, seller, promos, campanhas, jornal, setJornal,
-                   routeState, setRouteState,
-                   drawerCnpj, setDrawerCnpj,
-                   setSellerAndGoHoje: (c) => { setSellerCode(c); setTab("hoje"); } };
+  const shared = {
+    engine, seller, promos, campanhas, jornal, setJornal,
+    intel, metaManual, setMetaManual,
+    metasRaw, mixGoldRaw, campsCsv, deParaRaw,
+    routeState, setRouteState,
+    drawerCnpj, setDrawerCnpj,
+    setSellerAndGoHoje: (c) => { setSellerCode(c); setTab("hoje"); },
+  };
 
   return (
     <div className="min-h-screen pb-20">
       <Header engine={engine} sellerCode={sellerCode} setSellerCode={setSellerCode}
-        onReset={() => { setData(null); setEngine(null); setJornal(null); setPromos([]); setCampanhas([]); }} />
+        onReset={() => { setData(null); setEngine(null); setJornal(null); setPromos([]); setCampanhas([]); setMetasRaw([]); setMixGoldRaw([]); setCampsCsv([]); setDeParaRaw([]); setMetaManual(null); }} />
       <Nav tab={tab} setTab={setTab} />
       <main className="max-w-[1600px] mx-auto px-4 pt-5">
+        {tab === "meumes"     && <TelaMeuMes {...shared} setTab={setTab} />}
         {tab === "hoje"       && <TelaHoje {...shared} />}
+        {tab === "cestas"     && <TelaCestas {...shared} />}
         {tab === "rota"       && <TelaRota {...shared} />}
         {tab === "produtos"   && <Produtos {...shared} />}
         {tab === "supervisor" && <TelaSupervisor {...shared} />}
         {tab === "dados"      && <Qualidade engine={engine} />}
       </main>
-      {/* Drawer global de detalhes do cliente */}
       {drawerCnpj && <DrawerCliente cnpj={drawerCnpj} {...shared} onClose={() => setDrawerCnpj(null)} />}
     </div>
   );
@@ -1201,7 +1785,14 @@ function UploadScreen({ onLoaded }) {
     { k:"clientes",   label:"4. Clientes",             hint:"identify (CNPJ), external_code, name, address, code_route, seller, supervisor" },
     { k:"estoque",    label:"5. Estoque",              hint:"ean_sku, unit_quantity, list_price, margin, turnover_days" },
     { k:"roteiros",   label:"6. Roteiros",             hint:"user_internal_code, customer_identify, date, order" },
-    { k:"produtos",   label:"7. Produtos (opcional)",  hint:"ean, sku, name, manufacturer, category, brand — usado para foto + categoria" },
+    { k:"produtos",   label:"7. Produtos (opcional)",  hint:"ean, sku, name, manufacturer, category, brand" },
+  ];
+  // V4: bases opcionais novas
+  const slotsV4 = [
+    { k:"metas",   label:"📊 Metas (opcional)",          hint:"seller_internal_code, month, year, revenue_goal, positivity_goal" },
+    { k:"mixGold", label:"⭐ Mix Gold (opcional)",       hint:"channel ou category, sku, ean, name, suggested_quantity, priority" },
+    { k:"campsCsv",label:"🏆 Campanhas estruturadas (opcional)", hint:"campaign_name, sku, ean, discount, start_date, end_date, channel" },
+    { k:"dePara",  label:"🖼️ De/Para de imagens (opcional)",     hint:"internal_code, sku, ean, image_url, search_term — evita buscar imagem por código interno" },
   ];
 
   const handlePick = (k, f) => setFiles(prev => ({ ...prev, [k]: f }));
@@ -1214,6 +1805,12 @@ function UploadScreen({ onLoaded }) {
         try { data[s.k] = files[s.k] ? await parseCSV(files[s.k]) : []; }
         catch (e) { console.error("Erro CSV", s.k, e); data[s.k] = []; }
       }
+      // bases V4 (opcionais)
+      const extras = {};
+      for (const s of slotsV4) {
+        try { extras[s.k] = files[s.k] ? await parseCSV(files[s.k]) : []; }
+        catch (e) { console.error("Erro CSV V4", s.k, e); extras[s.k] = []; }
+      }
       let pdfData = null;
       if (pdf) {
         try {
@@ -1225,7 +1822,7 @@ function UploadScreen({ onLoaded }) {
           setError("PDF falhou ao processar — abrindo sem ele. " + (e?.message || ""));
         }
       }
-      onLoaded(data, pdfData);
+      onLoaded(data, pdfData, extras);
     } catch (e) {
       console.error("Erro fatal upload:", e);
       setError(String(e?.message || e));
@@ -1257,8 +1854,28 @@ function UploadScreen({ onLoaded }) {
             <span className="font-semibold text-sm">📰 Jornalzinho EBD (PDF)</span>
             {pdf && <span className="text-emerald-400 text-xs">✓ {pdf.name}</span>}
           </div>
-          <div className="text-[11px] text-slate-400 mb-2">PDF com promoções e campanhas. Habilita as abas Informativo e Campanhas. Sistema extrai texto + renderiza imagens das páginas.</div>
+          <div className="text-[11px] text-slate-400 mb-2">PDF com promoções e campanhas. Habilita as abas Informativo e Campanhas.</div>
           <input type="file" accept="application/pdf,.pdf" onChange={(e)=>setPdf(e.target.files?.[0])} className="text-xs text-slate-200" />
+        </div>
+
+        {/* V4 — Bases opcionais avançadas */}
+        <div className="mt-6">
+          <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">📈 V4 — Inteligência de vendas (bases opcionais)</div>
+          <div className="grid md:grid-cols-2 gap-3">
+            {slotsV4.map(s => (
+              <div key={s.k} className="glass-strong rounded-xl p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold text-sm">{s.label}</span>
+                  {files[s.k] && <span className="text-emerald-400 text-xs">✓</span>}
+                </div>
+                <div className="text-[10px] text-slate-400 mb-2">{s.hint}</div>
+                <input type="file" accept=".csv,text/csv" onChange={(e) => handlePick(s.k, e.target.files?.[0])} className="text-xs text-slate-200" />
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 text-[10px] text-slate-500">
+            Sem essas bases o MVP funciona normalmente, mas Cestas Inteligentes e impacto em meta ficam mais ricos quando elas são carregadas.
+          </div>
         </div>
         {error && <div className="mt-4 p-3 bg-rose-900/40 text-rose-200 rounded-lg text-sm">{error}</div>}
         {pdfProgress && <div className="mt-3 text-xs text-amber-300">{pdfProgress}</div>}
@@ -3181,9 +3798,9 @@ function ProximaParada({ r, setDrawerCnpj }) {
 }
 
 /* ============================================================
-   DRAWER CLIENTE — detalhe lateral com 4 abas
+   DRAWER CLIENTE — detalhe lateral, ordem V4: Resumo → Histórico → Cestas → Dados
    ============================================================ */
-function DrawerCliente({ cnpj, engine, seller, promos, campanhas, onClose, routeState }) {
+function DrawerCliente({ cnpj, engine, seller, promos, campanhas, onClose, routeState, intel }) {
   const [aba, setAba] = useState("resumo");
   const [verTodos, setVerTodos] = useState(false);
   const c = useMemo(() => {
@@ -3231,8 +3848,8 @@ function DrawerCliente({ cnpj, engine, seller, promos, campanhas, onClose, route
         </div>
         <div className="flex border-b border-white/10 bg-white/5">
           <TabBtnDrawer active={aba==="resumo"}    onClick={()=>setAba("resumo")}    label="Resumo" />
-          <TabBtnDrawer active={aba==="produtos"}  onClick={()=>setAba("produtos")}  label="Produtos" badge={allSugestoes.length||null} />
           <TabBtnDrawer active={aba==="historico"} onClick={()=>setAba("historico")} label="Histórico" badge={c.vendasCli.length||null} />
+          <TabBtnDrawer active={aba==="cestas"}    onClick={()=>setAba("cestas")}    label="Cestas" badge={allSugestoes.length||null} />
           <TabBtnDrawer active={aba==="dados"}     onClick={()=>setAba("dados")}     label="Dados" />
         </div>
         <div className="flex-1 overflow-y-auto scroll-thin">
@@ -3275,25 +3892,8 @@ function DrawerCliente({ cnpj, engine, seller, promos, campanhas, onClose, route
               )}
             </div>
           )}
-          {aba === "produtos" && (
-            <div className="p-5 space-y-3">
-              {top3.length === 0 ? (
-                <div className="text-sm text-slate-400 text-center py-8">
-                  Sem oportunidades detectadas. Carregue o jornalzinho na aba <b>Produtos</b> para ativar sugestões.
-                </div>
-              ) : (
-                <>
-                  <div className="text-[11px] text-slate-400">3 principais sugestões agora</div>
-                  {top3.map((r,i) => <CardProdutoSimples key={r.ean+'-'+r.tipo} r={r} idx={i+1} />)}
-                  {allSugestoes.length > 3 && !verTodos && (
-                    <button onClick={() => setVerTodos(true)} className="w-full px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300">
-                      Ver todas as {allSugestoes.length} oportunidades →
-                    </button>
-                  )}
-                  {verTodos && resto.map((r,i) => <CardProdutoSimples key={r.ean+'-'+r.tipo+'-r'} r={r} idx={i+4} />)}
-                </>
-              )}
-            </div>
+          {aba === "cestas" && (
+            <DrawerCestas cliente={c} intel={intel} seller={seller} routeState={routeState} />
           )}
           {aba === "historico" && (
             <div className="p-5 space-y-2">
@@ -3356,6 +3956,31 @@ function TabBtnDrawer({ active, onClick, label, badge }) {
       {label}
       {badge && <span className="ml-1.5 text-[10px] bg-white/10 rounded-full px-1.5">{badge}</span>}
     </button>
+  );
+}
+
+/* DrawerCestas — usa o Sales Intelligence Engine para mostrar combos + argumento */
+function DrawerCestas({ cliente, intel, seller, routeState }) {
+  if (!intel) return <div className="p-5 text-sm text-slate-400">Sales Intelligence Engine não inicializado.</div>;
+  const status = intel.statusVendedor(seller);
+  const jaPos = status?.clientesPositivados?.has(cliente.cnpj) || false;
+  const combos = intel.gerarCombos(cliente, seller, status, jaPos);
+  const argumento = intel.argumentoCliente(cliente, combos);
+  if (!combos.length) {
+    return <div className="p-5 text-sm text-slate-400 text-center">
+      Sem combos sugeridos. Carregue Mix Gold, Campanhas estruturadas ou o jornalzinho para ampliar a inteligência.
+    </div>;
+  }
+  return (
+    <div className="p-5 space-y-3">
+      {argumento && (
+        <div className="glass-strong rounded-xl p-3 border-l-4 border-blue-500">
+          <div className="text-[10px] uppercase tracking-wider text-blue-300 font-bold mb-1">💬 Argumento sugerido</div>
+          <div className="text-sm">{argumento}</div>
+        </div>
+      )}
+      {combos.map(co => <CardCombo key={co.id} combo={co} statusVend={status} />)}
+    </div>
   );
 }
 
@@ -3567,8 +4192,26 @@ function ItemCarteira({ c, r, setDrawerCnpj }) {
    TELA SUPERVISOR — Ranking + Clientes para recuperar
    ============================================================ */
 function TelaSupervisor(props) {
-  const { engine, setSellerAndGoHoje, setDrawerCnpj } = props;
+  const { engine, setSellerAndGoHoje, setDrawerCnpj, intel } = props;
   const [aba, setAba] = useState("ranking");
+  // Agregado de metas da equipe (V4)
+  const equipeMeta = useMemo(() => {
+    if (!intel) return null;
+    let revGoalTot = 0, revRealTot = 0, posGoalTot = 0, posRealTot = 0, comMeta = 0;
+    engine.sellers.filter(s => s.internal_code).forEach(s => {
+      const st = intel.statusVendedor(s);
+      if (!st) return;
+      revRealTot += st.revReal; posRealTot += st.posReal;
+      if (st.hasMeta) {
+        revGoalTot += st.revGoal; posGoalTot += st.posGoal; comMeta++;
+      }
+    });
+    return { revGoalTot, revRealTot, posGoalTot, posRealTot, comMeta,
+      revGap: Math.max(0, revGoalTot - revRealTot), posGap: Math.max(0, posGoalTot - posRealTot),
+      revPct: revGoalTot>0 ? revRealTot/revGoalTot : null,
+      posPct: posGoalTot>0 ? posRealTot/posGoalTot : null,
+    };
+  }, [intel, engine]);
   const ranking = useMemo(() => {
     return engine.sellers.filter(s => s.internal_code).map(s => {
       const lista = engine.clientesDoVendedor(s);
@@ -3601,6 +4244,30 @@ function TelaSupervisor(props) {
 
   return (
     <div className="space-y-4">
+      {/* V4: meta da equipe */}
+      {equipeMeta && equipeMeta.revGoalTot > 0 && (
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="glass rounded-2xl p-4">
+            <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-1">Meta de faturamento da equipe</div>
+            <div className="flex items-end justify-between mb-2">
+              <div className="text-2xl font-bold text-emerald-300">{fmtMoney(equipeMeta.revRealTot)}</div>
+              <div className="text-xs text-slate-400">de {fmtMoney(equipeMeta.revGoalTot)}</div>
+            </div>
+            <div className="progress-bar"><div className="progress-fill bg-emerald-500" style={{width: `${Math.min(100, (equipeMeta.revPct||0)*100)}%`}}></div></div>
+            <div className="mt-2 text-xs">Gap: <b>{fmtMoney(equipeMeta.revGap)}</b> · {equipeMeta.comMeta} vendedores com meta</div>
+          </div>
+          <div className="glass rounded-2xl p-4">
+            <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-1">Meta de positivação da equipe</div>
+            <div className="flex items-end justify-between mb-2">
+              <div className="text-2xl font-bold text-blue-300">{fmtInt(equipeMeta.posRealTot)} clientes</div>
+              <div className="text-xs text-slate-400">de {fmtInt(equipeMeta.posGoalTot)}</div>
+            </div>
+            <div className="progress-bar"><div className="progress-fill bg-blue-500" style={{width: `${Math.min(100, (equipeMeta.posPct||0)*100)}%`}}></div></div>
+            <div className="mt-2 text-xs">Gap: <b>{fmtInt(equipeMeta.posGap)} clientes</b></div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiSimples label="Vendedores ativos" value={ranking.length} cor="blue" />
         <KpiSimples label="Clientes para recuperar" value={totalCriticos} cor={totalCriticos>0?"rose":"slate"} />
@@ -3765,6 +4432,364 @@ function Produtos(props) {
           </div>
         ))}
         {lista.length===0 && <div className="col-span-full text-sm text-slate-400 text-center py-12">Nenhum produto encontrado.</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   ============================================================
+   ✨ V4 — TelaMeuMes (painel gerencial) e TelaCestas (combos)
+   ============================================================
+   ============================================================ */
+
+function TelaMeuMes(props) {
+  const { engine, seller, intel, metaManual, setMetaManual, setTab, setDrawerCnpj, routeState } = props;
+  if (!seller) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Selecione um vendedor.</div>;
+  const sVend = intel?.statusVendedor(seller);
+  if (!sVend) return <div className="glass rounded-2xl p-6 text-sm">Sem dados de vendedor.</div>;
+  const rotaCnpjs = Array.from(routeState?.incluidos || []);
+  const iv = intel.intelPorVendedor(seller, rotaCnpjs);
+  const mesNome = engine.refDate ? engine.refDate.toLocaleDateString("pt-BR", { month:"long", year:"numeric" }) : "—";
+  const [modoMeta, setModoMeta] = useState("auto"); // auto | manual
+  const [revInput, setRevInput] = useState(metaManual?.revGoal || "");
+  const [posInput, setPosInput] = useState(metaManual?.posGoal || "");
+
+  return (
+    <div className="space-y-5">
+      {/* Cabeçalho */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-2xl font-bold leading-tight">Olá, {seller.name.split(" ")[0]}</div>
+          <div className="text-xs text-slate-400 capitalize">Mês de referência: {mesNome}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setTab("hoje")} className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold">Ver rota de hoje</button>
+          <button onClick={() => setTab("cestas")} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-sm">Ver oportunidades</button>
+        </div>
+      </div>
+
+      {/* Aviso se não há meta */}
+      {!sVend.hasMeta && (
+        <div className="glass rounded-2xl p-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="font-bold text-sm">📊 Meta não carregada</div>
+              <div className="text-xs text-slate-400">Sem planilha de metas, mostramos só o realizado. Você pode informar uma meta simulada abaixo.</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="number" placeholder="Meta R$" value={revInput} onChange={e=>setRevInput(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm w-32" />
+              <input type="number" placeholder="Meta posit." value={posInput} onChange={e=>setPosInput(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm w-32" />
+              <button onClick={() => setMetaManual({ revGoal: parseNum(revInput), posGoal: parseNum(posInput) })}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm">Simular</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2 cards grandes de meta */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <CardMeta titulo="Faturamento"
+          realizado={sVend.revReal}
+          meta={sVend.revGoal}
+          gap={sVend.revGap}
+          pct={sVend.revPct}
+          fmt={fmtMoney}
+          cor="emerald" />
+        <CardMeta titulo="Positivação"
+          realizado={sVend.posReal}
+          meta={sVend.posGoal}
+          gap={sVend.posGap}
+          pct={sVend.posPct}
+          fmt={fmtInt}
+          cor="blue"
+          unidade="clientes" />
+      </div>
+
+      {/* Oportunidade da rota de hoje */}
+      <div className="glass rounded-2xl p-4">
+        <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">Sua rota de hoje pode ajudar</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div>
+            <div className="text-[10px] text-slate-400">Potencial faturamento</div>
+            <div className="text-xl font-bold text-emerald-300">+{fmtMoney(iv.rotaPotFat||0)}</div>
+            {sVend.revGap>0 && iv.rotaPotFat>0 && <div className="text-[10px] text-slate-400">{((iv.rotaPotFat/sVend.revGap)*100).toFixed(0)}% do gap</div>}
+          </div>
+          <div>
+            <div className="text-[10px] text-slate-400">Clientes p/ positivar</div>
+            <div className="text-xl font-bold text-blue-300">+{iv.rotaPotPos||0}</div>
+            {sVend.posGap>0 && <div className="text-[10px] text-slate-400">de {sVend.posGap} que faltam</div>}
+          </div>
+          <div>
+            <div className="text-[10px] text-slate-400">Clientes na rota</div>
+            <div className="text-xl font-bold">{rotaCnpjs.length}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-slate-400">Top cliente do dia</div>
+            <div className="text-xs font-bold truncate">{iv.topClientes[0]?.c.cli.name || "—"}</div>
+            {iv.topClientes[0]?.valorPotencial>0 && <div className="text-[10px] text-emerald-300">+{fmtMoney(iv.topClientes[0].valorPotencial)} potencial</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* O que fazer hoje */}
+      <div className="grid md:grid-cols-3 gap-4">
+        {/* Clientes que mais ajudam */}
+        <div className="glass rounded-2xl p-4">
+          <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-3">Clientes que mais ajudam na meta</div>
+          {iv.topClientes.length === 0 ? (
+            <div className="text-xs text-slate-400">Sem dados suficientes ainda.</div>
+          ) : iv.topClientes.slice(0,5).map((x,i) => (
+            <div key={x.c.cnpj} onClick={() => setDrawerCnpj(x.c.cnpj)} className="flex items-center gap-2 py-2 border-b border-white/5 cursor-pointer hover:bg-white/5 last:border-0">
+              <div className="w-6 h-6 rounded-full bg-emerald-700 text-white text-xs font-bold flex items-center justify-center">{i+1}</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold truncate">{x.c.cli.name}</div>
+                <div className="text-[10px] text-slate-400">{x.c.cli.neighborhood||"—"}</div>
+              </div>
+              <div className="text-right text-[10px]">
+                <div className="font-bold text-emerald-300">{fmtMoney(x.valorPotencial)}</div>
+                <div className="text-slate-400">{x.top?.skus.length || 0} SKUs</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Clientes para recuperar/positivar */}
+        <div className="glass rounded-2xl p-4">
+          <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-3">Para positivar este mês</div>
+          {iv.clientesNaoPositivados.length === 0 ? (
+            <div className="text-xs text-slate-400">Todos os clientes da carteira já positivaram.</div>
+          ) : iv.clientesNaoPositivados.slice(0,5).map((c,i) => (
+            <div key={c.cnpj} onClick={() => setDrawerCnpj(c.cnpj)} className="flex items-center gap-2 py-2 border-b border-white/5 cursor-pointer hover:bg-white/5 last:border-0">
+              <div className="w-6 h-6 rounded-full bg-rose-700 text-white text-xs font-bold flex items-center justify-center">{i+1}</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold truncate">{c.cli.name}</div>
+                <div className="text-[10px] text-slate-400">{c.diasSemVenda===null?"Sem histórico":`${c.diasSemVenda}d sem comprar`}</div>
+              </div>
+            </div>
+          ))}
+          {iv.clientesNaoPositivados.length > 5 && <div className="text-[10px] text-slate-500 mt-1">+{iv.clientesNaoPositivados.length-5} clientes</div>}
+        </div>
+
+        {/* Combos com maior impacto */}
+        <div className="glass rounded-2xl p-4">
+          <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-3">Combos com maior impacto</div>
+          {(() => {
+            const cArr = [];
+            iv.clientes.forEach(x => {
+              x.combos.forEach(co => cArr.push({ c: x.c, co }));
+            });
+            cArr.sort((a,b) => (b.co.valor||0) - (a.co.valor||0));
+            const top = cArr.slice(0, 5);
+            if (!top.length) return <div className="text-xs text-slate-400">Sem combos com valor estimado.</div>;
+            return top.map((x,i) => (
+              <div key={`${x.c.cnpj}-${x.co.id}`} onClick={() => setDrawerCnpj(x.c.cnpj)} className="py-2 border-b border-white/5 cursor-pointer hover:bg-white/5 last:border-0">
+                <div className="text-xs font-semibold truncate">{x.co.nome}</div>
+                <div className="text-[10px] text-slate-400 truncate">para {x.c.cli.name}</div>
+                <div className="text-[10px] text-emerald-300 font-bold">{x.co.valor ? fmtMoney(x.co.valor) : "—"} · {x.co.skus.length} SKUs</div>
+              </div>
+            ));
+          })()}
+        </div>
+      </div>
+
+      {/* Resumo comercial — top produtos / esquecidos / sem compra */}
+      <ResumoComercial seller={seller} engine={engine} setDrawerCnpj={setDrawerCnpj} />
+    </div>
+  );
+}
+
+function CardMeta({ titulo, realizado, meta, gap, pct, fmt, cor = "blue", unidade }) {
+  const corMap = {
+    emerald: { txt:"text-emerald-300", bg:"bg-emerald-500" },
+    blue:    { txt:"text-blue-300",    bg:"bg-blue-500" },
+  };
+  const c = corMap[cor] || corMap.blue;
+  const semMeta = !meta;
+  const pctNum = pct === null || pct === undefined ? 0 : Math.min(100, Math.round(pct * 100));
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-bold uppercase tracking-wider text-slate-400">{titulo}</div>
+        {!semMeta && <div className={`text-2xl font-bold ${c.txt}`}>{pctNum}%</div>}
+      </div>
+      <div className={`text-3xl font-bold ${c.txt}`}>{fmt(realizado)}{unidade ? ` ${unidade}`:""}</div>
+      {semMeta ? (
+        <div className="text-xs text-slate-400 mt-2">Meta não carregada. Carregue a planilha de Metas ou use o simulador acima.</div>
+      ) : (
+        <>
+          <div className="text-xs text-slate-400 mt-1">de {fmt(meta)}{unidade ? ` ${unidade}`:""}</div>
+          <div className="mt-3 progress-bar"><div className={`progress-fill ${c.bg}`} style={{width: `${pctNum}%`}}></div></div>
+          <div className="mt-2 text-sm">Faltam <b className="text-white">{fmt(gap||0)}{unidade ? ` ${unidade}`:""}</b></div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ResumoComercial({ seller, engine, setDrawerCnpj }) {
+  const stats = useMemo(() => {
+    const code = seller?.internal_code;
+    if (!code) return null;
+    const vendas = engine.vendasByVendedorCode.get(code) || [];
+    const refMonthKey = engine.refDate ? monthKey(engine.refDate.getFullYear(), engine.refDate.getMonth()+1) : null;
+    const noMes = vendas.filter(v => v.date && refMonthKey === monthKey(v.date.getFullYear(), v.date.getMonth()+1));
+    // top produtos
+    const prodMap = new Map();
+    noMes.forEach(v => {
+      if (!v.ean) return;
+      if (!prodMap.has(v.ean)) prodMap.set(v.ean, { ean:v.ean, sku:v.sku, val:0, qtd:0 });
+      const r = prodMap.get(v.ean); r.val += v.valor; r.qtd += v.volume;
+    });
+    const topProds = Array.from(prodMap.values()).sort((a,b)=>b.val-a.val).slice(0,5);
+    // top clientes
+    const cliMap = new Map();
+    noMes.forEach(v => { if (!v.cnpj) return; cliMap.set(v.cnpj, (cliMap.get(v.cnpj)||0) + v.valor); });
+    const topCli = Array.from(cliMap.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5)
+      .map(([cnpj, val]) => ({ cnpj, val, cli: engine.cliByCnpj.get(cnpj) }));
+    // ticket médio
+    const tot = noMes.reduce((a,v)=>a+v.valor,0);
+    const ped = new Set(noMes.map(v => `${v.cnpj}|${v.dateStr}`)).size;
+    const ticket = ped>0 ? tot/ped : 0;
+    return { topProds, topCli, ticket, totMes: tot, qtdPed: ped };
+  }, [seller, engine]);
+  if (!stats) return null;
+  return (
+    <div className="grid md:grid-cols-3 gap-4">
+      <div className="glass rounded-2xl p-4">
+        <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">Top clientes do mês</div>
+        {stats.topCli.map((x,i) => (
+          <div key={x.cnpj} onClick={()=>setDrawerCnpj(x.cnpj)} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-white/5">
+            <span className="text-[10px] w-4 text-slate-400">{i+1}</span>
+            <div className="min-w-0 flex-1 text-xs truncate">{x.cli?.name||x.cnpj}</div>
+            <div className="text-[10px] font-bold text-emerald-300">{fmtMoney(x.val)}</div>
+          </div>
+        ))}
+        {stats.topCli.length === 0 && <div className="text-xs text-slate-400">Sem vendas no mês.</div>}
+      </div>
+      <div className="glass rounded-2xl p-4">
+        <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">Top produtos do mês</div>
+        {stats.topProds.map((p,i) => {
+          const prod = engine.prodByEan?.get(p.ean);
+          return (
+            <div key={p.ean} className="flex items-center gap-2 py-1.5">
+              <ProductImage ean={p.ean} sku={p.sku} prod={prod} />
+              <div className="min-w-0 flex-1 text-xs truncate">{prod?.name || `SKU ${p.sku||p.ean}`}</div>
+              <div className="text-[10px] font-bold text-emerald-300">{fmtMoney(p.val)}</div>
+            </div>
+          );
+        })}
+        {stats.topProds.length === 0 && <div className="text-xs text-slate-400">Sem vendas no mês.</div>}
+      </div>
+      <div className="glass rounded-2xl p-4">
+        <div className="text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">Resumo do mês</div>
+        <div className="text-xs space-y-1.5">
+          <div className="flex justify-between"><span className="text-slate-400">Faturamento</span><b>{fmtMoney(stats.totMes)}</b></div>
+          <div className="flex justify-between"><span className="text-slate-400">Pedidos</span><b>{fmtInt(stats.qtdPed)}</b></div>
+          <div className="flex justify-between"><span className="text-slate-400">Ticket médio</span><b>{fmtMoney(stats.ticket)}</b></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TELA CESTAS — Combos por cliente, ordenados por contribuição em meta
+   ============================================================ */
+function TelaCestas(props) {
+  const { engine, seller, intel, setDrawerCnpj, routeState } = props;
+  const [filtro, setFiltro] = useState("rota"); // rota | todos
+  if (!seller || !intel) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Selecione um vendedor.</div>;
+  const rotaCnpjs = Array.from(routeState?.incluidos || []);
+  const iv = intel.intelPorVendedor(seller, rotaCnpjs);
+  const lista = filtro === "rota" ? iv.clientes.filter(x => x.naRota) : iv.clientes;
+  const ordenado = [...lista].sort((a,b) => (b.valorPotencial||0) - (a.valorPotencial||0));
+  const sVend = iv.status;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-xl font-bold">Cestas Inteligentes</div>
+          <div className="text-xs text-slate-400">Combos sugeridos por cliente com impacto estimado em meta</div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={()=>setFiltro("rota")} className={`px-3 py-1.5 rounded-lg text-sm ${filtro==="rota"?"bg-blue-600 text-white":"bg-white/10"}`}>Rota de hoje ({iv.clientes.filter(x=>x.naRota).length})</button>
+          <button onClick={()=>setFiltro("todos")} className={`px-3 py-1.5 rounded-lg text-sm ${filtro==="todos"?"bg-blue-600 text-white":"bg-white/10"}`}>Toda a carteira ({iv.clientes.length})</button>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {ordenado.slice(0, 50).map(x => (
+          <div key={x.c.cnpj} className="glass rounded-2xl p-4">
+            <div className="flex items-start justify-between flex-wrap gap-2 mb-3">
+              <div className="cursor-pointer" onClick={()=>setDrawerCnpj(x.c.cnpj)}>
+                <div className="text-sm font-bold">{x.c.cli.name}</div>
+                <div className="text-[11px] text-slate-400">{x.c.cli.neighborhood||"—"} · {x.c.cli.ramo||x.c.cli.tag||"sem ramo"}</div>
+                {!x.jaPositivouMes && <span className="badge bg-rose-700 text-rose-100 text-[9px] mt-1">não positivou no mês</span>}
+                {x.jaPositivouMes && <span className="badge bg-emerald-700 text-emerald-100 text-[9px] mt-1">já positivado</span>}
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-slate-400">Potencial total</div>
+                <div className="text-xl font-bold text-emerald-300">{x.valorPotencial>0?fmtMoney(x.valorPotencial):"—"}</div>
+              </div>
+            </div>
+            {x.combos.length === 0 ? (
+              <div className="text-xs text-slate-400">Sem combos sugeridos para este cliente.</div>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-2">
+                {x.combos.slice(0,4).map(co => <CardCombo key={co.id} combo={co} statusVend={sVend} />)}
+              </div>
+            )}
+          </div>
+        ))}
+        {ordenado.length === 0 && <div className="glass rounded-2xl p-6 text-sm text-slate-400 text-center">Nenhum cliente {filtro==="rota"?"marcado para hoje":"na carteira"}.</div>}
+      </div>
+    </div>
+  );
+}
+
+function CardCombo({ combo, statusVend }) {
+  const tipoCor = {
+    rotina:"emerald", recompra:"blue", recuperacao:"amber", mixgold:"violet",
+    campanha:"amber", oportunidade:"blue", positivacao:"rose", faturamento:"emerald", equilibrado:"slate",
+  }[combo.tipoCombo] || "slate";
+  const corMap = {
+    emerald:"border-emerald-500", blue:"border-blue-500", amber:"border-amber-500",
+    violet:"border-violet-500", rose:"border-rose-500", slate:"border-slate-500"
+  };
+  return (
+    <div className={`glass-strong rounded-xl p-3 border-l-4 ${corMap[tipoCor]}`}>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="text-xs font-bold">{combo.nome}</div>
+        <span className={`badge ${combo.conf==="alta"?"bg-emerald-700":combo.conf==="média"?"bg-amber-700":"bg-slate-700"} text-white text-[9px]`}>{combo.conf}</span>
+      </div>
+      <div className="text-[10px] text-slate-400 mb-2">{combo.motivo}</div>
+      <div className="flex flex-wrap gap-1 mb-2">
+        {combo.skus.slice(0,5).map(s => (
+          <span key={s.ean} className="text-[10px] bg-white/5 px-1.5 py-0.5 rounded" title={s.prod?.name||s.ean}>
+            {s.prod?.name?.substring(0,20) || `SKU ${s.sku||s.ean}`}
+          </span>
+        ))}
+      </div>
+      <div className="flex items-center justify-between text-xs">
+        <div>
+          <div className="font-bold text-emerald-300">{combo.valor ? fmtMoney(combo.valor) : <span className="text-slate-400">sem estimativa</span>}</div>
+          {combo.semPreco && <div className="text-[9px] text-amber-300">alguns SKUs sem preço</div>}
+        </div>
+        <div className="text-right text-[10px]">
+          {combo.impactoFat!==null && combo.impactoFat>0 && (
+            <div className="text-slate-300">{(combo.impactoFat*100).toFixed(1)}% da meta</div>
+          )}
+          {combo.impactoGap!==null && combo.impactoGap>0 && (
+            <div className="text-emerald-300">{(combo.impactoGap*100).toFixed(1)}% do gap</div>
+          )}
+          {combo.impactoPos>0 && (
+            <div className="text-blue-300">+1 positivação</div>
+          )}
+        </div>
       </div>
     </div>
   );
