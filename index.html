@@ -4445,15 +4445,18 @@ function Produtos(props) {
 
 function TelaMeuMes(props) {
   const { engine, seller, intel, metaManual, setMetaManual, setTab, setDrawerCnpj, routeState } = props;
-  if (!seller) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Selecione um vendedor.</div>;
-  const sVend = intel?.statusVendedor(seller);
-  if (!sVend) return <div className="glass rounded-2xl p-6 text-sm">Sem dados de vendedor.</div>;
-  const rotaCnpjs = Array.from(routeState?.incluidos || []);
-  const iv = intel.intelPorVendedor(seller, rotaCnpjs);
-  const mesNome = engine.refDate ? engine.refDate.toLocaleDateString("pt-BR", { month:"long", year:"numeric" }) : "—";
-  const [modoMeta, setModoMeta] = useState("auto"); // auto | manual
+  // ⚠️ TODOS os hooks devem vir ANTES de qualquer early return (Rules of Hooks)
   const [revInput, setRevInput] = useState(metaManual?.revGoal || "");
   const [posInput, setPosInput] = useState(metaManual?.posGoal || "");
+  const sVend = useMemo(() => seller && intel ? intel.statusVendedor(seller) : null, [seller, intel]);
+  const rotaCnpjs = useMemo(() => Array.from(routeState?.incluidos || []), [routeState]);
+  const iv = useMemo(() => (seller && intel && sVend) ? intel.intelPorVendedor(seller, rotaCnpjs) : null, [seller, intel, sVend, rotaCnpjs]);
+
+  if (!seller) return <div className="glass rounded-2xl p-6 text-sm text-slate-400">Selecione um vendedor.</div>;
+  if (!sVend) return <div className="glass rounded-2xl p-6 text-sm">Sem dados de vendedor.</div>;
+  if (!iv) return <div className="glass rounded-2xl p-6 text-sm">Construindo inteligência…</div>;
+
+  const mesNome = engine.refDate ? engine.refDate.toLocaleDateString("pt-BR", { month:"long", year:"numeric" }) : "—";
 
   return (
     <div className="space-y-5">
