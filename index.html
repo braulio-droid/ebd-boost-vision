@@ -3821,15 +3821,15 @@ function DrawerCliente({ cnpj, engine, seller, promos, campanhas, onClose, route
     obj.score = engine.scoreCliente(obj);
     return obj;
   }, [cnpj, engine, seller]);
-  const intel = useMemo(() => c ? engine.recomendaInteligente(c, promos||[], campanhas||[]) : null, [c, engine, promos, campanhas]);
+  const recomendacoes = useMemo(() => c ? engine.recomendaInteligente(c, promos||[], campanhas||[]) : null, [c, engine, promos, campanhas]);
   const visita = routeState?.visitas?.[cnpj];
   if (!c) return null;
   const sc = StatusCor[c.status] || StatusCor.SEM_HIST;
-  const allSugestoes = intel ? [
-    ...intel.reposicao.map(r => ({...r, tipoLabel:"Reposição", tipoCor:"emerald", tipoIcone:"🔄"})),
-    ...intel.novoInformativo.map(r => ({...r, tipoLabel:"Novo no informativo", tipoCor:"amber", tipoIcone:"📰"})),
-    ...intel.recompra.map(r => ({...r, tipoLabel:"Recompra esquecida", tipoCor:"blue", tipoIcone:"🔁"})),
-    ...intel.campanha.map(r => ({...r, tipoLabel:"Campanha", tipoCor:"violet", tipoIcone:"🏆"})),
+  const allSugestoes = recomendacoes ? [
+    ...recomendacoes.reposicao.map(r => ({...r, tipoLabel:"Reposição", tipoCor:"emerald", tipoIcone:"🔄"})),
+    ...recomendacoes.novoInformativo.map(r => ({...r, tipoLabel:"Novo no informativo", tipoCor:"amber", tipoIcone:"📰"})),
+    ...recomendacoes.recompra.map(r => ({...r, tipoLabel:"Recompra esquecida", tipoCor:"blue", tipoIcone:"🔁"})),
+    ...recomendacoes.campanha.map(r => ({...r, tipoLabel:"Campanha", tipoCor:"violet", tipoIcone:"🏆"})),
   ].sort((a,b)=>b.score-a.score) : [];
   const top3 = allSugestoes.slice(0,3);
   const resto = allSugestoes.slice(3);
